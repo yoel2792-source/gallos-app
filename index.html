@@ -1242,6 +1242,55 @@ const DashboardModule = () => {
         </div>
       )}
 
+      {/* SECCIÓN GALLOS AMARRADOS */}
+      {(() => {
+        const amarrados = gallos.filter(g => g.amarrado);
+        if (amarrados.length === 0) return null;
+        return (
+          <div className="mt-6">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-px bg-gray-200 flex-1" />
+              <span className="text-sm font-bold text-red-700 uppercase tracking-wider">Gallos Amarrados ({amarrados.length})</span>
+              <div className="h-px bg-gray-200 flex-1" />
+            </div>
+            <div className="space-y-2">
+              {amarrados.map(g => {
+                const pa = gallos.find(x => x.id === g.padre_id);
+                const ma = gallos.find(x => x.id === g.madre_id);
+                return (
+                  <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:border-red-300 active:bg-gray-50 transition"
+                    onClick={() => loadData(g)}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-800">{g.nombre || 'Sin nombre'}</span>
+                          {g.numero_pinches && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">#{g.numero_pinches}</span>}
+                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado</span>
+                          <span className="text-xs text-gray-400">{g.sexo === 'Gallina' ? '♀' : '♂'}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {[g.linea_genetica, g.color].filter(Boolean).join(' • ') || 'Sin datos adicionales'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Padre: {pa ? (pa.nombre || '#' + pa.numero_pinches) : '?'} • Madre: {ma ? (ma.nombre || '#' + ma.numero_pinches) : '?'}
+                        </p>
+                        {g.caracteristicas && g.caracteristicas.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {g.caracteristicas.slice(0, 5).map(c => <span key={c} className="text-[10px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">{c}</span>)}
+                            {g.caracteristicas.length > 5 && <span className="text-[10px] text-gray-400">+{g.caracteristicas.length - 5}</span>}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-gray-300 text-lg ml-2">›</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Árbol modal */}
       {showArbol && selected && (
         <Modal title={`Árbol: ${selected.nombre || '#' + selected.numero_pinches}`} onClose={() => setShowArbol(false)} wide>
