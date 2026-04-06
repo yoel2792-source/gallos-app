@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GallosPR - Sistema de Gestión</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="manifest" href="data:application/json,{}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#dc2626">
+    <style>
+      * { -webkit-tap-highlight-color: transparent; }
+      body { overscroll-behavior: none; }
+      .fade-in { animation: fadeIn 0.2s ease-in; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
+      input, select, textarea { font-size: 16px !important; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
+
+// ============================================
+// SUPABASE CLIENT
+// ============================================
+const SUPABASE_URL = 'https://lpgzeiyparsqzhwopyvc.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZ3plaXlwYXJzcXpod29weXZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQzNzYsImV4cCI6MjA5MTA1MDM3Nn0.NIh_N6xxkwT-c_iROK0FMEfdgDYW89QwsMOv_k30S04';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ============================================
+// CONTEXTO GLOBAL
+// ============================================
+const AppContext = createContext();
+
+// ============================================
+// COMPONENTE: Toast Notifications
+// ============================================
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
+  const bg = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500';
+  return (
+    <div className={`fixed top-4 right-4 left-4 md:left-auto md:w-80 ${bg} text-white px-4 py-3 rounded-lg shadow-lg z-50 fade-in`}>
+      <div className="flex justify-between items-center">
+        <span className="text-sm font-medium">{message}</span>
+        <button onClick={onClose} className="ml-2 text-white/80 hover:text-white">✕</button>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// COMPONENTE: Modal genérico
+// ============================================
+const Modal = ({ title, onClose, children, wide }) => (
+  <div className="fixed inset-0 modal-overlay z-40 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+    <div className={`bg-white rounded-t-2xl md:rounded-2xl w-full ${wide ? 'md:max-w-4xl' : 'md:max-w-lg'} max-h-[90vh] overflow-y-auto shadow-2xl fade-in`}
+         onClick={e => e.stopPropagation()}>
+      <div className="sticky top-0 bg-white border-b px-4 py-3 rounded-t-2xl flex justify-between items-center z-10">
+        <h3 className="text-lg font-bold text-gray-800">{title}</h3>
+        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">✕</button>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  </div>
+);
+
+// ============================================
+// COMPONENTE: Campo de formulario
+// ============================================
+const Field = ({ label, children, required }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">
+      {label} {required && <span className="text-red-500">*</span>}
+    </label>
+    {children}
+  </div>
+);
+
+const Input = (props) => <input {...props} className={`w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none ${props.className || ''}`} />;
+const Select = ({ options, ...props }) => (
+  <select {...props} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none">
+    {options.map(o => <option key={typeof o === 'string' ? o : o.value} value={typeof o === 'string' ? o : o.value}>{typeof o === 'string' ? o : o.label}</option>)}
+  </select>
+);
+const Textarea = (props) => <textarea {...props} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none h-20" />;
+
+// ============================================
+// COMPONENTE: Búsqueda de Gallo (reutilizable)
+// ============================================
+const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter }) => {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+
+  const filtered = useMemo(() => {
+    if (!q) return [];
+    const query = q.toLowerCase();
+    let list = gallos;
+    if (filter) list = list.filter(filter);
+    return list.filter(g =>
+      (g.nombre && g.nombre.toLowerCase().includes(query)) ||
+      (g.numero_pinches && g.numero_pinches.toString().includes(query))
+    ).slice(0, 10);
+  }, [q, gallos, filter]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  if (selected) {
+    return (
+      <div className="flex items-center gap-2 p-2.5 bg-red-50 border border-red-200 rounded-lg">
+        <span className="flex-1 text-sm font-medium text-red-800">
+          {selected.nombre || ''} {selected.numero_pinches ? `(#${selected.numero_pinches})` : ''}
+        </span>
+        <button onClick={onClear} className="text-xs text-red-600 hover:text-red-800 font-medium">Cambiar</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <Input
+        type="text" placeholder={placeholder || 'Buscar gallo...'}
+        value={q} onChange={e => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && q && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 max-h-48 overflow-y-auto">
+          {filtered.length > 0 ? filtered.map(g => (
+            <button key={g.id} onClick={() => { onSelect(g); setQ(''); setOpen(false); }}
+              className="w-full text-left px-3 py-2.5 hover:bg-red-50 border-b border-gray-100 last:border-0">
+              <p className="font-medium text-gray-800 text-sm">{g.nombre || 'Sin nombre'} {g.numero_pinches ? `(#${g.numero_pinches})` : ''}</p>
+              <p className="text-xs text-gray-500">{g.linea_genetica || 'Sin línea'} • {g.sexo} {g.amarrado ? '• Amarrado' : ''}</p>
+            </button>
+          )) : <p className="px-3 py-2.5 text-sm text-gray-400">No encontrado</p>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// MÓDULO: GENÉTICA
+// ============================================
+const GeneticaModule = () => {
+  const { gallos, loadGallos, opciones, addOpcion, toast } = useContext(AppContext);
+  const [showForm, setShowForm] = useState(false);
+  const [editingGallo, setEditingGallo] = useState(null);
+  const [showArbol, setShowArbol] = useState(null);
+  const [searchQ, setSearchQ] = useState('');
+
+  const emptyForm = {
+    numero_pinches: '', nombre: '', sexo: 'Gallo', amarrado: false,
+    fecha_nacimiento: '', color: '', linea_genetica: '',
+    padre_id: null, madre_id: null, caracteristicas: [], observaciones: ''
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [padreSelected, setPadreSelected] = useState(null);
+  const [madreSelected, setMadreSelected] = useState(null);
+
+  const caracteristicas = opciones.filter(o => o.tipo === 'caracteristicas').map(o => o.valor);
+  const [nuevaCar, setNuevaCar] = useState('');
+
+  const filteredGallos = useMemo(() => {
+    if (!searchQ) return gallos;
+    const q = searchQ.toLowerCase();
+    return gallos.filter(g =>
+      (g.nombre && g.nombre.toLowerCase().includes(q)) ||
+      (g.numero_pinches && g.numero_pinches.toString().includes(q)) ||
+      (g.linea_genetica && g.linea_genetica.toLowerCase().includes(q))
+    );
+  }, [gallos, searchQ]);
+
+  const handleSave = async () => {
+    if (!form.numero_pinches && !form.nombre) {
+      toast('Debes ingresar Número de Pinches o Nombre', 'error');
+      return;
+    }
+
+    const data = {
+      nombre: form.nombre || null,
+      numero_pinches: form.numero_pinches ? parseInt(form.numero_pinches) : null,
+      sexo: form.sexo,
+      amarrado: form.amarrado,
+      fecha_nacimiento: form.fecha_nacimiento || null,
+      color: form.color || null,
+      linea_genetica: form.linea_genetica || null,
+      padre_id: form.padre_id,
+      madre_id: form.madre_id,
+      caracteristicas: form.caracteristicas,
+      observaciones: form.observaciones || null
+    };
+
+    let error;
+    if (editingGallo) {
+      ({ error } = await supabase.from('gallos').update(data).eq('id', editingGallo.id));
+    } else {
+      ({ error } = await supabase.from('gallos').insert(data));
+    }
+
+    if (error) {
+      toast(error.message.includes('unique') ? 'Ya existe un gallo con ese número de pinches' : error.message, 'error');
+      return;
+    }
+
+    toast(editingGallo ? 'Gallo actualizado' : 'Gallo creado', 'success');
+    setShowForm(false);
+    setEditingGallo(null);
+    setForm(emptyForm);
+    setPadreSelected(null);
+    setMadreSelected(null);
+    loadGallos();
+  };
+
+  const handleEdit = (gallo) => {
+    setForm({
+      numero_pinches: gallo.numero_pinches || '',
+      nombre: gallo.nombre || '',
+      sexo: gallo.sexo || 'Gallo',
+      amarrado: gallo.amarrado || false,
+      fecha_nacimiento: gallo.fecha_nacimiento || '',
+      color: gallo.color || '',
+      linea_genetica: gallo.linea_genetica || '',
+      padre_id: gallo.padre_id,
+      madre_id: gallo.madre_id,
+      caracteristicas: gallo.caracteristicas || [],
+      observaciones: gallo.observaciones || ''
+    });
+    const padre = gallos.find(g => g.id === gallo.padre_id);
+    const madre = gallos.find(g => g.id === gallo.madre_id);
+    setPadreSelected(padre || null);
+    setMadreSelected(madre || null);
+    setEditingGallo(gallo);
+    setShowForm(true);
+  };
+
+  const handleDelete = async (gallo) => {
+    if (!confirm(`¿Eliminar a ${gallo.nombre || '#' + gallo.numero_pinches}?`)) return;
+    const { error } = await supabase.from('gallos').delete().eq('id', gallo.id);
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Gallo eliminado', 'success');
+    loadGallos();
+  };
+
+  const toggleCar = (car) => {
+    setForm(f => ({
+      ...f,
+      caracteristicas: f.caracteristicas.includes(car)
+        ? f.caracteristicas.filter(c => c !== car)
+        : [...f.caracteristicas, car]
+    }));
+  };
+
+  const handleAddCar = async () => {
+    if (!nuevaCar.trim()) return;
+    await addOpcion('caracteristicas', nuevaCar.trim());
+    setForm(f => ({ ...f, caracteristicas: [...f.caracteristicas, nuevaCar.trim()] }));
+    setNuevaCar('');
+  };
+
+  // Árbol genealógico completo
+  const ArbolModal = ({ gallo }) => {
+    const padre = gallos.find(g => g.id === gallo.padre_id);
+    const madre = gallos.find(g => g.id === gallo.madre_id);
+    const abueloP = padre ? gallos.find(g => g.id === padre.padre_id) : null;
+    const abuelaP = padre ? gallos.find(g => g.id === padre.madre_id) : null;
+    const abueloM = madre ? gallos.find(g => g.id === madre.padre_id) : null;
+    const abuelaM = madre ? gallos.find(g => g.id === madre.madre_id) : null;
+
+    // Hermanos: mismos padres (al menos uno en común), excluyendo el gallo actual
+    const hermanos = gallos.filter(g => {
+      if (g.id === gallo.id) return false;
+      const compartenPadre = gallo.padre_id && g.padre_id && gallo.padre_id === g.padre_id;
+      const compartenMadre = gallo.madre_id && g.madre_id && gallo.madre_id === g.madre_id;
+      return compartenPadre || compartenMadre;
+    });
+
+    // Hijos: gallos donde este gallo es padre o madre
+    const hijos = gallos.filter(g => g.padre_id === gallo.id || g.madre_id === gallo.id);
+
+    // Nietos: hijos de los hijos
+    const nietos = gallos.filter(g => hijos.some(h => h.id === g.padre_id || h.id === g.madre_id));
+
+    const Nodo = ({ gallo: g, label, highlight, small }) => (
+      <div className={`border-2 rounded-lg p-2 text-center ${small ? 'min-w-[80px]' : 'min-w-[100px]'} ${
+        highlight ? 'border-red-500 bg-red-50' : 'border-gray-200 bg-white'
+      }`}>
+        <p className="text-[10px] text-gray-400 uppercase">{label}</p>
+        {g ? (
+          <>
+            <p className={`font-bold ${small ? 'text-xs' : 'text-sm'} ${highlight ? 'text-red-800' : 'text-gray-800'}`}>
+              {g.nombre || 'Sin nombre'} {g.numero_pinches ? `(#${g.numero_pinches})` : ''}
+            </p>
+            <p className={`text-[10px] ${highlight ? 'text-red-600' : 'text-gray-500'}`}>
+              {[g.linea_genetica, g.color].filter(Boolean).join(' • ') || ''}
+            </p>
+            {highlight && g.caracteristicas && g.caracteristicas.length > 0 && (
+              <div className="flex flex-wrap gap-1 justify-center mt-1">
+                {g.caracteristicas.map(c => <span key={c} className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded">{c}</span>)}
+              </div>
+            )}
+          </>
+        ) : <p className="text-xs text-gray-400 italic">Desconocido</p>}
+      </div>
+    );
+
+    const Flecha = () => <div className="text-gray-300 text-xl text-center">↓</div>;
+
+    const SeccionLabel = ({ text, count }) => (
+      <div className="flex items-center gap-2 justify-center mb-2">
+        <div className="h-px bg-gray-200 flex-1" />
+        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{text} {count > 0 ? `(${count})` : ''}</span>
+        <div className="h-px bg-gray-200 flex-1" />
+      </div>
+    );
+
+    return (
+      <Modal title={`Árbol: ${gallo.nombre || '#' + gallo.numero_pinches}`} onClose={() => setShowArbol(null)} wide>
+        <div className="overflow-x-auto">
+          <div className="min-w-[600px] flex flex-col items-center gap-3 py-4">
+
+            {/* ABUELOS */}
+            <SeccionLabel text="Abuelos" />
+            <div className="flex gap-3 justify-center flex-wrap">
+              <Nodo gallo={abueloP} label="Abuelo Pat." />
+              <Nodo gallo={abuelaP} label="Abuela Pat." />
+              <Nodo gallo={abueloM} label="Abuelo Mat." />
+              <Nodo gallo={abuelaM} label="Abuela Mat." />
+            </div>
+            <Flecha />
+
+            {/* PADRES */}
+            <SeccionLabel text="Padres" />
+            <div className="flex gap-8 justify-center">
+              <Nodo gallo={padre} label="Padre" />
+              <Nodo gallo={madre} label="Madre" />
+            </div>
+            <Flecha />
+
+            {/* GALLO SELECCIONADO + HERMANOS */}
+            <SeccionLabel text={hermanos.length > 0 ? 'Gallo + Hermanos' : 'Gallo'} />
+            <div className="flex gap-3 justify-center items-start flex-wrap">
+              {hermanos.filter(h => {
+                const compartenPadre = gallo.padre_id && h.padre_id && gallo.padre_id === h.padre_id;
+                const compartenMadre = gallo.madre_id && h.madre_id && gallo.madre_id === h.madre_id;
+                return compartenPadre && compartenMadre;
+              }).map(h => (
+                <Nodo key={h.id} gallo={h} label="Hermano" small />
+              ))}
+              <Nodo gallo={gallo} label="★ Seleccionado" highlight />
+              {hermanos.filter(h => {
+                const compartenPadre = gallo.padre_id && h.padre_id && gallo.padre_id === h.padre_id;
+                const compartenMadre = gallo.madre_id && h.madre_id && gallo.madre_id === h.madre_id;
+                return !(compartenPadre && compartenMadre);
+              }).map(h => (
+                <Nodo key={h.id} gallo={h} label="Medio-Hno." small />
+              ))}
+            </div>
+
+            {/* HIJOS Y NIETOS JERÁRQUICO */}
+            {hijos.length > 0 && (
+              <>
+                <Flecha />
+                <SeccionLabel text="Hijos y Descendientes" count={hijos.length} />
+                <div className="flex gap-6 justify-center flex-wrap">
+                  {hijos.map(h => {
+                    const otroParent = h.padre_id === gallo.id
+                      ? gallos.find(g => g.id === h.madre_id)
+                      : gallos.find(g => g.id === h.padre_id);
+                    const nietosDelHijo = gallos.filter(n => n.padre_id === h.id || n.madre_id === h.id);
+
+                    return (
+                      <div key={h.id} className="flex flex-col items-center">
+                        <Nodo gallo={h} label="Hijo/a" small />
+                        {otroParent && <p className="text-[9px] text-gray-400 mt-0.5">con {otroParent.nombre || '#' + otroParent.numero_pinches}</p>}
+
+                        {/* Nietos cuelgan del hijo */}
+                        {nietosDelHijo.length > 0 && (
+                          <div className="flex flex-col items-center mt-2">
+                            <div className="text-gray-300 text-sm">↓</div>
+                            <div className="flex gap-2 flex-wrap justify-center">
+                              {nietosDelHijo.map(n => {
+                                const otroNietoParent = n.padre_id === h.id
+                                  ? gallos.find(g => g.id === n.madre_id)
+                                  : gallos.find(g => g.id === n.padre_id);
+                                return (
+                                  <div key={n.id} className="flex flex-col items-center">
+                                    <Nodo gallo={n} label="Nieto/a" small />
+                                    {otroNietoParent && otroNietoParent.id !== gallo.id && <p className="text-[8px] text-gray-300 mt-0.5">{otroNietoParent.nombre || '#' + otroNietoParent.numero_pinches}</p>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+          </div>
+        </div>
+      </Modal>
+    );
+  };
+
+  return (
+    <div className="fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Genética</h2>
+          <p className="text-sm text-gray-500">{gallos.length} gallos registrados</p>
+        </div>
+        <button onClick={() => { setForm(emptyForm); setEditingGallo(null); setPadreSelected(null); setMadreSelected(null); setShowForm(true); }}
+          className="bg-red-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-red-700 active:bg-red-800">
+          + Nuevo Gallo
+        </button>
+      </div>
+
+      {/* Búsqueda */}
+      <Input type="text" placeholder="Buscar por nombre, pinches o línea..." value={searchQ}
+        onChange={e => setSearchQ(e.target.value)} className="mb-4" />
+
+      {/* Lista */}
+      <div className="space-y-2">
+        {filteredGallos.length === 0 ? (
+          <p className="text-center text-gray-400 py-12">No hay gallos registrados</p>
+        ) : filteredGallos.map(g => (
+          <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 active:bg-gray-50">
+            <div className="flex items-start justify-between">
+              <div className="flex-1 min-w-0" onClick={() => handleEdit(g)}>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-gray-800 truncate">{g.nombre || 'Sin nombre'}</span>
+                  {g.numero_pinches && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">#{g.numero_pinches}</span>}
+                  {g.amarrado && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado</span>}
+                  <span className="text-xs text-gray-400">{g.sexo === 'Gallina' ? '♀' : '♂'}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {[g.linea_genetica, g.color].filter(Boolean).join(' • ') || 'Sin datos adicionales'}
+                </p>
+                {g.caracteristicas && g.caracteristicas.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {g.caracteristicas.slice(0, 4).map(c => <span key={c} className="text-[10px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">{c}</span>)}
+                    {g.caracteristicas.length > 4 && <span className="text-[10px] text-gray-400">+{g.caracteristicas.length - 4}</span>}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1 ml-2">
+                <button onClick={() => setShowArbol(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-lg" title="Árbol">🌳</button>
+                <button onClick={() => handleDelete(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 text-lg" title="Eliminar">🗑</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal Árbol */}
+      {showArbol && <ArbolModal gallo={showArbol} />}
+
+      {/* Modal Formulario */}
+      {showForm && (
+        <Modal title={editingGallo ? 'Editar Gallo' : 'Nuevo Gallo'} onClose={() => setShowForm(false)}>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="# Pinches">
+                <Input type="number" placeholder="ej: 22" value={form.numero_pinches}
+                  onChange={e => setForm({...form, numero_pinches: e.target.value})} />
+              </Field>
+              <Field label="Nombre">
+                <Input type="text" placeholder="ej: Negro Pava" value={form.nombre}
+                  onChange={e => setForm({...form, nombre: e.target.value})} />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Sexo">
+                <Select value={form.sexo} onChange={e => setForm({...form, sexo: e.target.value})}
+                  options={['Gallo', 'Gallina']} />
+              </Field>
+              <Field label="Amarrado">
+                <Select value={form.amarrado ? 'Sí' : 'No'}
+                  onChange={e => setForm({...form, amarrado: e.target.value === 'Sí'})}
+                  options={[{value: 'No', label: 'No'}, {value: 'Sí', label: 'Sí'}]} />
+              </Field>
+              <Field label="Nacimiento">
+                <Input type="date" value={form.fecha_nacimiento}
+                  onChange={e => setForm({...form, fecha_nacimiento: e.target.value})} />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Color">
+                <Input type="text" placeholder="ej: Rubio Negro" value={form.color}
+                  onChange={e => setForm({...form, color: e.target.value})} />
+              </Field>
+              <Field label="Línea Genética">
+                <Input type="text" placeholder="ej: Los Moscas" value={form.linea_genetica}
+                  onChange={e => setForm({...form, linea_genetica: e.target.value})} />
+              </Field>
+            </div>
+
+            {/* Genealogía */}
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Genealogía</p>
+              <div className="grid grid-cols-1 gap-3">
+                <Field label="Padre">
+                  <GalloSearch gallos={gallos} selected={padreSelected}
+                    onSelect={g => { setPadreSelected(g); setForm(f => ({...f, padre_id: g.id})); }}
+                    onClear={() => { setPadreSelected(null); setForm(f => ({...f, padre_id: null})); }}
+                    placeholder="Buscar padre..." />
+                </Field>
+                <Field label="Madre">
+                  <GalloSearch gallos={gallos} selected={madreSelected}
+                    onSelect={g => { setMadreSelected(g); setForm(f => ({...f, madre_id: g.id})); }}
+                    onClear={() => { setMadreSelected(null); setForm(f => ({...f, madre_id: null})); }}
+                    placeholder="Buscar madre..." />
+                </Field>
+              </div>
+            </div>
+
+            {/* Características */}
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Características</p>
+              <div className="flex flex-wrap gap-1.5">
+                {caracteristicas.map(c => (
+                  <button key={c} onClick={() => toggleCar(c)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      form.caracteristicas.includes(c) ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
+                    }`}>{c}</button>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Input type="text" placeholder="Nueva característica..." value={nuevaCar}
+                  onChange={e => setNuevaCar(e.target.value)} className="flex-1 !py-1.5 text-sm" />
+                <button onClick={handleAddCar} className="bg-gray-200 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-300">+</button>
+              </div>
+            </div>
+
+            <Field label="Observaciones">
+              <Textarea placeholder="Notas adicionales..." value={form.observaciones}
+                onChange={e => setForm({...form, observaciones: e.target.value})} />
+            </Field>
+
+            <button onClick={handleSave}
+              className="w-full bg-red-600 text-white py-3 rounded-lg font-bold text-base hover:bg-red-700 active:bg-red-800">
+              {editingGallo ? 'Actualizar Gallo' : 'Crear Gallo'}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// MÓDULO: ENTRENAMIENTOS
+// ============================================
+const EntrenamientosModule = () => {
+  const { gallos, opciones, addOpcion, toast } = useContext(AppContext);
+  const [entrenamientos, setEntrenamientos] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [galloFilter, setGalloFilter] = useState(null);
+  const [showDetalle, setShowDetalle] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const nutricionOpts = opciones.filter(o => o.tipo === 'nutricion').map(o => o.valor);
+  const [nuevaNut, setNuevaNut] = useState('');
+
+  const emptyForm = {
+    gallo_id: null, fecha: new Date().toISOString().split('T')[0],
+    peso_libras: '', peso_onzas: '0', corrida: '', chata: '',
+    clima: 'Soleado', temperatura: '', tomo_sol: 'No', intensidad: 'Medio',
+    animo_gallo: 'Normal', condicion_plumeras_general: 'Buena',
+    condicion_plumeras_alas: 'Buena', condicion_plumeras_rabos: 'Buena',
+    problemas_alas: 'No', condicion_pico: 'Normal', condicion_espuelas: 'Sanas',
+    nutricion_items: [], desparasitante: '', medicinas_especiales: '', alimentacion_especial: '',
+    desempeno_general: 'Bueno', velocidad: 'Normal', resistencia: 'Buena', razon_malo: '', observaciones: ''
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [galloSelected, setGalloSelected] = useState(null);
+
+  const loadEntrenamientos = async () => {
+    setLoading(true);
+    let query = supabase.from('entrenamientos').select('*, gallos(nombre, numero_pinches)').order('fecha', { ascending: false }).limit(100);
+    if (galloFilter) query = query.eq('gallo_id', galloFilter.id);
+    const { data, error } = await query;
+    if (!error) setEntrenamientos(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadEntrenamientos(); }, [galloFilter]);
+
+  const handleSave = async () => {
+    if (!form.gallo_id) { toast('Selecciona un gallo', 'error'); return; }
+    if (!form.peso_libras) { toast('El peso es requerido', 'error'); return; }
+
+    const data = {
+      ...form,
+      peso_libras: parseInt(form.peso_libras),
+      peso_onzas: parseInt(form.peso_onzas) || 0,
+      corrida: form.corrida ? parseFloat(form.corrida) : null,
+      chata: form.chata ? parseFloat(form.chata) : null,
+      temperatura: form.temperatura ? parseFloat(form.temperatura) : null,
+    };
+
+    let error;
+    if (editingId) {
+      const { created_at, updated_at, gallos: _, ...cleanData } = data;
+      ({ error } = await supabase.from('entrenamientos').update(cleanData).eq('id', editingId));
+    } else {
+      ({ error } = await supabase.from('entrenamientos').insert(data));
+    }
+
+    if (error) { toast(error.message, 'error'); return; }
+    toast(editingId ? 'Entrenamiento actualizado' : 'Entrenamiento registrado', 'success');
+    setShowForm(false);
+    setEditingId(null);
+    setForm(emptyForm);
+    setGalloSelected(null);
+    loadEntrenamientos();
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('¿Eliminar este entrenamiento?')) return;
+    await supabase.from('entrenamientos').delete().eq('id', id);
+    toast('Eliminado', 'success');
+    loadEntrenamientos();
+  };
+
+  const handleEdit = (ent) => {
+    const gallo = gallos.find(g => g.id === ent.gallo_id);
+    setGalloSelected(gallo || null);
+    setForm({ ...ent });
+    setEditingId(ent.id);
+    setShowForm(true);
+  };
+
+  const toggleNut = (n) => {
+    setForm(f => ({
+      ...f,
+      nutricion_items: f.nutricion_items.includes(n)
+        ? f.nutricion_items.filter(x => x !== n)
+        : [...f.nutricion_items, n]
+    }));
+  };
+
+  const desempenoColor = (d) => {
+    if (d === 'Excelente') return 'bg-green-100 text-green-800';
+    if (d === 'Bueno') return 'bg-blue-100 text-blue-800';
+    if (d === 'Regular') return 'bg-yellow-100 text-yellow-800';
+    return 'bg-red-100 text-red-800';
+  };
+
+  return (
+    <div className="fade-in">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Entrenamientos</h2>
+          <p className="text-sm text-gray-500">{entrenamientos.length} registros</p>
+        </div>
+        <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
+          className="bg-green-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-green-700">
+          + Nuevo
+        </button>
+      </div>
+
+      {/* Filtro por gallo */}
+      <div className="mb-4">
+        <GalloSearch gallos={gallos} selected={galloFilter}
+          onSelect={g => setGalloFilter(g)} onClear={() => setGalloFilter(null)}
+          placeholder="Filtrar por gallo..." filter={g => g.amarrado} />
+      </div>
+
+      {/* Lista */}
+      {loading ? <p className="text-center text-gray-400 py-8">Cargando...</p> : (
+        <div className="space-y-2">
+          {entrenamientos.length === 0 ? (
+            <p className="text-center text-gray-400 py-12">No hay entrenamientos</p>
+          ) : entrenamientos.map(e => (
+            <div key={e.id} className="bg-white rounded-lg border border-gray-200 p-3" onClick={() => setShowDetalle(e)}>
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm text-gray-800">{e.gallos?.nombre || '#' + e.gallos?.numero_pinches}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {e.fecha} • {e.peso_libras}lb {e.peso_onzas}oz
+                    {e.corrida || e.chata ? ` • ${(parseFloat(e.corrida||0) + parseFloat(e.chata||0)).toFixed(0)}min` : ''}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={(ev) => { ev.stopPropagation(); handleEdit(e); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-sm">✏️</button>
+                  <button onClick={(ev) => { ev.stopPropagation(); handleDelete(e.id); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-50 text-sm">🗑</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal Detalle */}
+      {showDetalle && (
+        <Modal title="Detalle Entrenamiento" onClose={() => setShowDetalle(null)}>
+          {(() => { const e = showDetalle; return (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <div><span className="text-gray-500">Gallo:</span> <span className="font-medium">{e.gallos?.nombre || '#'+ e.gallos?.numero_pinches}</span></div>
+                <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{e.fecha}</span></div>
+                <div><span className="text-gray-500">Peso:</span> <span className="font-medium">{e.peso_libras}lb {e.peso_onzas}oz</span></div>
+                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{e.corrida || 0} + {e.chata || 0} min</span></div>
+                <div><span className="text-gray-500">Clima:</span> <span className="font-medium">{e.clima}</span></div>
+                <div><span className="text-gray-500">Temp:</span> <span className="font-medium">{e.temperatura || 'N/A'}°F</span></div>
+                <div><span className="text-gray-500">Sol:</span> <span className="font-medium">{e.tomo_sol}</span></div>
+                <div><span className="text-gray-500">Intensidad:</span> <span className="font-medium">{e.intensidad}</span></div>
+                <div><span className="text-gray-500">Ánimo:</span> <span className="font-medium">{e.animo_gallo}</span></div>
+                <div><span className="text-gray-500">Desempeño:</span> <span className={`font-medium px-1.5 py-0.5 rounded ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span></div>
+                <div><span className="text-gray-500">Velocidad:</span> <span className="font-medium">{e.velocidad}</span></div>
+                <div><span className="text-gray-500">Resistencia:</span> <span className="font-medium">{e.resistencia}</span></div>
+              </div>
+              <div className="border-t pt-2">
+                <p className="text-gray-500 mb-1">Plumas: General: {e.condicion_plumeras_general} | Alas: {e.condicion_plumeras_alas} | Rabos: {e.condicion_plumeras_rabos}</p>
+                <p className="text-gray-500">Pico: {e.condicion_pico} | Espuelas: {e.condicion_espuelas} | Alas prob: {e.problemas_alas}</p>
+              </div>
+              {e.nutricion_items && e.nutricion_items.length > 0 && (
+                <div className="border-t pt-2">
+                  <p className="text-gray-500">Nutrición:</p>
+                  <div className="flex flex-wrap gap-1 mt-1">{e.nutricion_items.map(n => <span key={n} className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">{n}</span>)}</div>
+                </div>
+              )}
+              {(e.desparasitante || e.medicinas_especiales || e.alimentacion_especial) && (
+                <div className="border-t pt-2 space-y-1">
+                  {e.desparasitante && <p className="text-gray-500">Desparasitante: <span className="text-gray-800">{e.desparasitante}</span></p>}
+                  {e.medicinas_especiales && <p className="text-gray-500">Medicinas: <span className="text-gray-800">{e.medicinas_especiales}</span></p>}
+                  {e.alimentacion_especial && <p className="text-gray-500">Alimentación: <span className="text-gray-800">{e.alimentacion_especial}</span></p>}
+                </div>
+              )}
+              {e.razon_malo && <div className="border-t pt-2"><p className="text-gray-500">Razón malo: <span className="text-red-700">{e.razon_malo}</span></p></div>}
+              {e.observaciones && <div className="border-t pt-2"><p className="text-gray-500">Observaciones: <span className="text-gray-800">{e.observaciones}</span></p></div>}
+            </div>
+          ); })()}
+        </Modal>
+      )}
+
+      {/* Modal Formulario */}
+      {showForm && (
+        <Modal title={editingId ? 'Editar Entrenamiento' : 'Nuevo Entrenamiento'} onClose={() => setShowForm(false)}>
+          <div className="space-y-4">
+            <Field label="Gallo" required>
+              <GalloSearch gallos={gallos} selected={galloSelected}
+                onSelect={g => { setGalloSelected(g); setForm(f => ({...f, gallo_id: g.id})); }}
+                onClear={() => { setGalloSelected(null); setForm(f => ({...f, gallo_id: null})); }}
+                placeholder="Buscar gallo amarrado..." filter={g => g.amarrado} />
+            </Field>
+
+            <Field label="Fecha" required>
+              <Input type="date" value={form.fecha} onChange={e => setForm({...form, fecha: e.target.value})} />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Peso (lb)" required><Input type="number" value={form.peso_libras} onChange={e => setForm({...form, peso_libras: e.target.value})} /></Field>
+              <Field label="Peso (oz)"><Input type="number" min="0" max="15" value={form.peso_onzas} onChange={e => setForm({...form, peso_onzas: e.target.value})} /></Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Corrida (min)"><Input type="number" value={form.corrida} onChange={e => setForm({...form, corrida: e.target.value})} /></Field>
+              <Field label="Chata (min)"><Input type="number" value={form.chata} onChange={e => setForm({...form, chata: e.target.value})} /></Field>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Clima"><Select value={form.clima} onChange={e => setForm({...form, clima: e.target.value})} options={['Soleado','Nublado','Lluvia']} /></Field>
+              <Field label="Temp °F"><Input type="number" value={form.temperatura} onChange={e => setForm({...form, temperatura: e.target.value})} /></Field>
+              <Field label="Tomó Sol"><Select value={form.tomo_sol} onChange={e => setForm({...form, tomo_sol: e.target.value})} options={['No','Sí','Parcial']} /></Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Intensidad"><Select value={form.intensidad} onChange={e => setForm({...form, intensidad: e.target.value})} options={['Bajo','Medio','Alto']} /></Field>
+              <Field label="Ánimo"><Select value={form.animo_gallo} onChange={e => setForm({...form, animo_gallo: e.target.value})} options={['Activo','Normal','Lento']} /></Field>
+            </div>
+
+            {/* Condición */}
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Condición Física</p>
+              <div className="grid grid-cols-3 gap-2">
+                <Field label="Plumas Gen."><Select value={form.condicion_plumeras_general} onChange={e => setForm({...form, condicion_plumeras_general: e.target.value})} options={['Buena','Regular','Mala']} /></Field>
+                <Field label="Alas"><Select value={form.condicion_plumeras_alas} onChange={e => setForm({...form, condicion_plumeras_alas: e.target.value})} options={['Buena','Regular','Mala']} /></Field>
+                <Field label="Rabos"><Select value={form.condicion_plumeras_rabos} onChange={e => setForm({...form, condicion_plumeras_rabos: e.target.value})} options={['Buena','Regular','Mala']} /></Field>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <Field label="Prob. Alas"><Select value={form.problemas_alas} onChange={e => setForm({...form, problemas_alas: e.target.value})} options={['No','Sí']} /></Field>
+                <Field label="Pico"><Select value={form.condicion_pico} onChange={e => setForm({...form, condicion_pico: e.target.value})} options={['Normal','Roto','Erosionado']} /></Field>
+                <Field label="Espuelas"><Select value={form.condicion_espuelas} onChange={e => setForm({...form, condicion_espuelas: e.target.value})} options={['Sanas','Lesionadas','En crecimiento']} /></Field>
+              </div>
+            </div>
+
+            {/* Nutrición */}
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Nutrición</p>
+              <div className="flex flex-wrap gap-1.5">
+                {nutricionOpts.map(n => (
+                  <button key={n} onClick={() => toggleNut(n)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      form.nutricion_items.includes(n) ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'
+                    }`}>{n}</button>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Input type="text" placeholder="Nueva nutrición..." value={nuevaNut} onChange={e => setNuevaNut(e.target.value)} className="flex-1 !py-1.5 text-sm" />
+                <button onClick={async () => { if (nuevaNut.trim()) { await addOpcion('nutricion', nuevaNut.trim()); setNuevaNut(''); }}} className="bg-gray-200 px-3 py-1.5 rounded-lg text-sm font-medium">+</button>
+              </div>
+            </div>
+
+            <Field label="Desparasitante"><Input type="text" placeholder="ej: Levamisol, 10ml" value={form.desparasitante} onChange={e => setForm({...form, desparasitante: e.target.value})} /></Field>
+            <Field label="Medicinas"><Input type="text" value={form.medicinas_especiales} onChange={e => setForm({...form, medicinas_especiales: e.target.value})} /></Field>
+            <Field label="Alimentación Especial"><Input type="text" value={form.alimentacion_especial} onChange={e => setForm({...form, alimentacion_especial: e.target.value})} /></Field>
+
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Desempeño</p>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="General"><Select value={form.desempeno_general} onChange={e => setForm({...form, desempeno_general: e.target.value})} options={['Excelente','Bueno','Regular','Malo']} /></Field>
+                <Field label="Velocidad"><Select value={form.velocidad} onChange={e => setForm({...form, velocidad: e.target.value})} options={['Rápido','Normal','Lento']} /></Field>
+                <Field label="Resistencia"><Select value={form.resistencia} onChange={e => setForm({...form, resistencia: e.target.value})} options={['Excelente','Buena','Regular','Débil']} /></Field>
+              </div>
+              {form.desempeno_general === 'Malo' && (
+                <Field label="¿Por qué mal?"><Input type="text" value={form.razon_malo} onChange={e => setForm({...form, razon_malo: e.target.value})} /></Field>
+              )}
+            </div>
+
+            <Field label="Observaciones"><Textarea value={form.observaciones} onChange={e => setForm({...form, observaciones: e.target.value})} /></Field>
+
+            <button onClick={handleSave} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700">
+              {editingId ? 'Actualizar' : 'Guardar'} Entrenamiento
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// MÓDULO: PELEAS
+// ============================================
+const PeleasModule = () => {
+  const { gallos, opciones, addOpcion, toast } = useContext(AppContext);
+  const [peleas, setPeleas] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [showDetalle, setShowDetalle] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const comoFueOpts = opciones.filter(o => o.tipo === 'como_fue').map(o => o.valor);
+  const estiloOpts = opciones.filter(o => o.tipo === 'estilos_oponente').map(o => o.valor);
+
+  const emptyForm = {
+    gallo_id: null, fecha: new Date().toISOString().split('T')[0], lugar: '',
+    duenio_oponente: '', peso_oponente_libras: '', peso_oponente_onzas: '', estilo_oponente: '',
+    armador: '', resultado: 'Ganó', duracion: '', dinero_jugado: '', moneda: 'USD',
+    como_fue: '', estilo_observado: '', puntos_positivos: '', puntos_negativos: '', lesiones: ''
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [galloSelected, setGalloSelected] = useState(null);
+
+  const loadPeleas = async () => {
+    setLoading(true);
+    const { data } = await supabase.from('peleas').select('*, gallos(nombre, numero_pinches)').order('fecha', { ascending: false }).limit(100);
+    if (data) setPeleas(data);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadPeleas(); }, []);
+
+  const lugaresUnicos = [...new Set(peleas.filter(p => p.lugar).map(p => p.lugar))];
+
+  const handleSave = async () => {
+    if (!form.gallo_id) { toast('Selecciona un gallo', 'error'); return; }
+    if (!form.resultado) { toast('El resultado es requerido', 'error'); return; }
+
+    const data = {
+      ...form,
+      peso_oponente_libras: form.peso_oponente_libras ? parseInt(form.peso_oponente_libras) : null,
+      peso_oponente_onzas: form.peso_oponente_onzas ? parseInt(form.peso_oponente_onzas) : null,
+      duracion: form.duracion ? parseInt(form.duracion) : null,
+      dinero_jugado: form.dinero_jugado ? parseFloat(form.dinero_jugado) : null,
+    };
+
+    let error;
+    if (editingId) {
+      const { created_at, updated_at, gallos: _, ...cleanData } = data;
+      ({ error } = await supabase.from('peleas').update(cleanData).eq('id', editingId));
+    } else {
+      ({ error } = await supabase.from('peleas').insert(data));
+    }
+
+    if (error) { toast(error.message, 'error'); return; }
+    toast(editingId ? 'Pelea actualizada' : 'Pelea registrada', 'success');
+    setShowForm(false); setEditingId(null); setForm(emptyForm); setGalloSelected(null);
+    loadPeleas();
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('¿Eliminar esta pelea?')) return;
+    await supabase.from('peleas').delete().eq('id', id);
+    toast('Eliminada', 'success');
+    loadPeleas();
+  };
+
+  const handleEdit = (p) => {
+    const gallo = gallos.find(g => g.id === p.gallo_id);
+    setGalloSelected(gallo || null);
+    setForm({ ...p });
+    setEditingId(p.id);
+    setShowForm(true);
+  };
+
+  // Stats rápidos
+  const totalGanadas = peleas.filter(p => p.resultado === 'Ganó').length;
+  const totalPerdidas = peleas.filter(p => p.resultado === 'Perdió').length;
+  const totalDinero = peleas.reduce((sum, p) => {
+    if (p.resultado === 'Ganó') return sum + (parseFloat(p.dinero_jugado) || 0);
+    return sum - (parseFloat(p.dinero_jugado) || 0);
+  }, 0);
+
+  return (
+    <div className="fade-in">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Peleas</h2>
+          <p className="text-sm text-gray-500">{peleas.length} registradas</p>
+        </div>
+        <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
+          className="bg-purple-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-purple-700">
+          + Nueva Pelea
+        </button>
+      </div>
+
+      {/* Stats */}
+      {peleas.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+            <p className="text-2xl font-bold text-green-700">{totalGanadas}</p>
+            <p className="text-xs text-green-600">Ganadas</p>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+            <p className="text-2xl font-bold text-red-700">{totalPerdidas}</p>
+            <p className="text-xs text-red-600">Perdidas</p>
+          </div>
+          <div className={`${totalDinero >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border rounded-lg p-3 text-center`}>
+            <p className={`text-2xl font-bold ${totalDinero >= 0 ? 'text-green-700' : 'text-red-700'}`}>${Math.abs(totalDinero).toFixed(0)}</p>
+            <p className={`text-xs ${totalDinero >= 0 ? 'text-green-600' : 'text-red-600'}`}>{totalDinero >= 0 ? 'Ganancia' : 'Pérdida'}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading ? <p className="text-center text-gray-400 py-8">Cargando...</p> : (
+        <div className="space-y-2">
+          {peleas.length === 0 ? (
+            <p className="text-center text-gray-400 py-12">No hay peleas registradas</p>
+          ) : peleas.map(p => (
+            <div key={p.id} className={`rounded-lg border p-3 ${p.resultado === 'Ganó' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}
+              onClick={() => setShowDetalle(p)}>
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm text-gray-800">{p.gallos?.nombre || '#' + p.gallos?.numero_pinches}</span>
+                    <span className={`text-xs font-bold ${p.resultado === 'Ganó' ? 'text-green-700' : 'text-red-700'}`}>{p.resultado === 'Ganó' ? '✅' : '❌'} {p.resultado}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {p.fecha} {p.lugar ? `• ${p.lugar}` : ''} {p.duracion ? `• ${p.duracion}min` : ''} {p.dinero_jugado ? `• $${p.dinero_jugado} ${p.moneda}` : ''}
+                  </p>
+                  {p.como_fue && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded mt-1 inline-block">{p.como_fue}</span>}
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={(ev) => { ev.stopPropagation(); handleEdit(p); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/50 text-sm">✏️</button>
+                  <button onClick={(ev) => { ev.stopPropagation(); handleDelete(p.id); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/50 text-sm">🗑</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal Detalle */}
+      {showDetalle && (
+        <Modal title="Detalle Pelea" onClose={() => setShowDetalle(null)}>
+          {(() => { const p = showDetalle; return (
+            <div className="space-y-3 text-sm">
+              <div className={`p-3 rounded-lg text-center ${p.resultado === 'Ganó' ? 'bg-green-100' : 'bg-red-100'}`}>
+                <p className="text-2xl font-bold">{p.resultado === 'Ganó' ? '✅ GANÓ' : '❌ PERDIÓ'}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><span className="text-gray-500">Gallo:</span> <span className="font-medium">{p.gallos?.nombre}</span></div>
+                <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{p.fecha}</span></div>
+                <div><span className="text-gray-500">Lugar:</span> <span className="font-medium">{p.lugar || 'N/A'}</span></div>
+                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{p.duracion || 'N/A'} min</span></div>
+                <div><span className="text-gray-500">Dinero:</span> <span className="font-medium">${p.dinero_jugado || 0} {p.moneda}</span></div>
+                <div><span className="text-gray-500">Cómo fue:</span> <span className="font-medium">{p.como_fue || 'N/A'}</span></div>
+                <div><span className="text-gray-500">Oponente:</span> <span className="font-medium">{p.duenio_oponente || 'N/A'}</span></div>
+                <div><span className="text-gray-500">Peso Op.:</span> <span className="font-medium">{p.peso_oponente_libras || '?'}lb {p.peso_oponente_onzas || 0}oz</span></div>
+                <div><span className="text-gray-500">Estilo Op.:</span> <span className="font-medium">{p.estilo_oponente || 'N/A'}</span></div>
+                <div><span className="text-gray-500">Armador:</span> <span className="font-medium">{p.armador || 'N/A'}</span></div>
+              </div>
+              {p.estilo_observado && <div className="border-t pt-2"><p className="text-gray-500">Estilo observado: <span className="text-gray-800">{p.estilo_observado}</span></p></div>}
+              {p.puntos_positivos && <div className="border-t pt-2"><p className="text-gray-500">Positivo: <span className="text-green-700">{p.puntos_positivos}</span></p></div>}
+              {p.puntos_negativos && <div className="border-t pt-2"><p className="text-gray-500">Negativo: <span className="text-red-700">{p.puntos_negativos}</span></p></div>}
+              {p.lesiones && <div className="border-t pt-2"><p className="text-gray-500">Lesiones: <span className="text-red-700">{p.lesiones}</span></p></div>}
+            </div>
+          ); })()}
+        </Modal>
+      )}
+
+      {/* Modal Formulario */}
+      {showForm && (
+        <Modal title={editingId ? 'Editar Pelea' : 'Nueva Pelea'} onClose={() => setShowForm(false)}>
+          <div className="space-y-4">
+            <Field label="Gallo (amarrado)" required>
+              <GalloSearch gallos={gallos} selected={galloSelected}
+                onSelect={g => { setGalloSelected(g); setForm(f => ({...f, gallo_id: g.id})); }}
+                onClear={() => { setGalloSelected(null); setForm(f => ({...f, gallo_id: null})); }}
+                filter={g => g.amarrado} placeholder="Buscar gallo amarrado..." />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Fecha" required><Input type="date" value={form.fecha} onChange={e => setForm({...form, fecha: e.target.value})} /></Field>
+              <Field label="Lugar">
+                <Input type="text" placeholder="ej: Gallera..." value={form.lugar} onChange={e => setForm({...form, lugar: e.target.value})}
+                  list="lugares-list" />
+                <datalist id="lugares-list">{lugaresUnicos.map(l => <option key={l} value={l} />)}</datalist>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Dueño Oponente"><Input type="text" value={form.duenio_oponente} onChange={e => setForm({...form, duenio_oponente: e.target.value})} /></Field>
+              <Field label="Armador"><Input type="text" value={form.armador} onChange={e => setForm({...form, armador: e.target.value})} /></Field>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Peso Op. (lb)"><Input type="number" value={form.peso_oponente_libras} onChange={e => setForm({...form, peso_oponente_libras: e.target.value})} /></Field>
+              <Field label="Peso Op. (oz)"><Input type="number" min="0" max="15" value={form.peso_oponente_onzas} onChange={e => setForm({...form, peso_oponente_onzas: e.target.value})} /></Field>
+              <Field label="Estilo Op.">
+                <Select value={form.estilo_oponente} onChange={e => setForm({...form, estilo_oponente: e.target.value})}
+                  options={[{value: '', label: 'Seleccionar...'}, ...estiloOpts]} />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Resultado" required>
+                <Select value={form.resultado} onChange={e => setForm({...form, resultado: e.target.value})}
+                  options={[{value:'Ganó',label:'✅ Ganó'},{value:'Perdió',label:'❌ Perdió'}]} />
+              </Field>
+              <Field label="Duración (min)"><Input type="number" value={form.duracion} onChange={e => setForm({...form, duracion: e.target.value})} /></Field>
+              <Field label="Dinero">
+                <div className="flex gap-1">
+                  <Input type="number" placeholder="$" value={form.dinero_jugado} onChange={e => setForm({...form, dinero_jugado: e.target.value})} className="flex-1" />
+                  <select value={form.moneda} onChange={e => setForm({...form, moneda: e.target.value})} className="border rounded-lg px-2 text-sm">
+                    <option value="USD">USD</option><option value="RD$">RD$</option>
+                  </select>
+                </div>
+              </Field>
+            </div>
+
+            {/* Cómo fue */}
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">¿Cómo fue?</p>
+              <div className="flex flex-wrap gap-1.5">
+                {comoFueOpts.map(c => (
+                  <button key={c} onClick={() => setForm({...form, como_fue: c})}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      form.como_fue === c ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700'
+                    }`}>{c}</button>
+                ))}
+              </div>
+            </div>
+
+            <Field label="Estilo Observado"><Input type="text" placeholder="¿Cómo peleó nuestro gallo?" value={form.estilo_observado} onChange={e => setForm({...form, estilo_observado: e.target.value})} /></Field>
+            <Field label="Puntos Positivos"><Textarea placeholder="¿Qué hizo bien?" value={form.puntos_positivos} onChange={e => setForm({...form, puntos_positivos: e.target.value})} /></Field>
+            <Field label="Puntos Negativos"><Textarea placeholder="¿Qué faltó?" value={form.puntos_negativos} onChange={e => setForm({...form, puntos_negativos: e.target.value})} /></Field>
+            <Field label="Lesiones"><Textarea placeholder="Descripción de lesiones..." value={form.lesiones} onChange={e => setForm({...form, lesiones: e.target.value})} /></Field>
+
+            <button onClick={handleSave} className="w-full bg-purple-600 text-white py-3 rounded-lg font-bold hover:bg-purple-700">
+              {editingId ? 'Actualizar' : 'Guardar'} Pelea
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// MÓDULO: DASHBOARD
+// ============================================
+const DashboardModule = () => {
+  const { gallos, toast } = useContext(AppContext);
+  const [selected, setSelected] = useState(null);
+  const [entrenamientos, setEntrenamientos] = useState([]);
+  const [peleas, setPeleas] = useState([]);
+  const [showArbol, setShowArbol] = useState(false);
+  const [showDetEnt, setShowDetEnt] = useState(null);
+  const [showDetPel, setShowDetPel] = useState(null);
+
+  const loadData = async (gallo) => {
+    setSelected(gallo);
+    const [{ data: ents }, { data: pels }] = await Promise.all([
+      supabase.from('entrenamientos').select('*').eq('gallo_id', gallo.id).order('fecha', { ascending: false }).limit(50),
+      supabase.from('peleas').select('*').eq('gallo_id', gallo.id).order('fecha', { ascending: false }).limit(50),
+    ]);
+    setEntrenamientos(ents || []);
+    setPeleas(pels || []);
+  };
+
+  const padre = selected ? gallos.find(g => g.id === selected.padre_id) : null;
+  const madre = selected ? gallos.find(g => g.id === selected.madre_id) : null;
+  const ganadas = peleas.filter(p => p.resultado === 'Ganó').length;
+  const perdidas = peleas.filter(p => p.resultado === 'Perdió').length;
+
+  const desempenoColor = (d) => {
+    if (d === 'Excelente') return 'bg-green-100 text-green-800';
+    if (d === 'Bueno') return 'bg-blue-100 text-blue-800';
+    if (d === 'Regular') return 'bg-yellow-100 text-yellow-800';
+    return 'bg-red-100 text-red-800';
+  };
+
+  return (
+    <div className="fade-in">
+      <h2 className="text-xl font-bold text-gray-800 mb-1">Dashboard</h2>
+      <p className="text-sm text-gray-500 mb-4">Busca un gallo para ver toda su información</p>
+
+      <GalloSearch gallos={gallos} selected={selected}
+        onSelect={loadData} onClear={() => { setSelected(null); setEntrenamientos([]); setPeleas([]); }}
+        placeholder="Buscar gallo por nombre o pinches..." />
+
+      {selected && (
+        <div className="mt-4 space-y-4">
+          {/* Info general */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800">{selected.nombre || 'Sin nombre'}</h3>
+                <p className="text-sm text-gray-500">
+                  {selected.numero_pinches ? `#${selected.numero_pinches} • ` : ''}{selected.sexo} • {selected.linea_genetica || 'Sin línea'}
+                  {selected.color ? ` • ${selected.color}` : ''}
+                </p>
+              </div>
+              {selected.amarrado && <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded">AMARRADO</span>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div className="text-sm"><span className="text-gray-500">Padre:</span> <span className="font-medium">{padre ? (padre.nombre || '#' + padre.numero_pinches) : 'Desconocido'}</span></div>
+              <div className="text-sm"><span className="text-gray-500">Madre:</span> <span className="font-medium">{madre ? (madre.nombre || '#' + madre.numero_pinches) : 'Desconocida'}</span></div>
+            </div>
+
+            {selected.caracteristicas && selected.caracteristicas.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-3">
+                {selected.caracteristicas.map(c => <span key={c} className="text-xs bg-orange-50 text-orange-700 px-2 py-0.5 rounded">{c}</span>)}
+              </div>
+            )}
+
+            {selected.amarrado && (
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                <div className="bg-blue-50 rounded-lg p-2 text-center">
+                  <p className="text-lg font-bold text-blue-700">{entrenamientos.length}</p>
+                  <p className="text-[10px] text-blue-600">Entrenamientos</p>
+                </div>
+                <div className="bg-green-50 rounded-lg p-2 text-center">
+                  <p className="text-lg font-bold text-green-700">{ganadas}</p>
+                  <p className="text-[10px] text-green-600">Ganadas</p>
+                </div>
+                <div className="bg-red-50 rounded-lg p-2 text-center">
+                  <p className="text-lg font-bold text-red-700">{perdidas}</p>
+                  <p className="text-[10px] text-red-600">Perdidas</p>
+                </div>
+              </div>
+            )}
+
+            <button onClick={() => setShowArbol(true)} className="mt-3 w-full bg-gray-100 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-200">
+              🌳 Ver Árbol Genealógico
+            </button>
+          </div>
+
+          {/* Entrenamientos recientes */}
+          {selected.amarrado && (
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <h4 className="font-bold text-gray-800 mb-3">Últimos Entrenamientos</h4>
+              {entrenamientos.length === 0 ? <p className="text-sm text-gray-400">Sin entrenamientos</p> : (
+                <div className="space-y-1.5">
+                  {entrenamientos.slice(0, 10).map(e => (
+                    <div key={e.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50 -mx-1 px-1 rounded"
+                      onClick={() => setShowDetEnt(e)}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 w-20">{e.fecha}</span>
+                        <span className="text-xs font-medium">{e.peso_libras}lb {e.peso_onzas}oz</span>
+                        {(e.corrida || e.chata) && <span className="text-xs text-gray-400">{(parseFloat(e.corrida||0)+parseFloat(e.chata||0)).toFixed(0)}min</span>}
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Peleas recientes */}
+          {selected.amarrado && (
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <h4 className="font-bold text-gray-800 mb-3">Historial de Peleas</h4>
+              {peleas.length === 0 ? <p className="text-sm text-gray-400">Sin peleas</p> : (
+                <div className="space-y-1.5">
+                  {peleas.slice(0, 10).map(p => (
+                    <div key={p.id} className={`flex items-center justify-between py-1.5 px-2 rounded cursor-pointer ${p.resultado === 'Ganó' ? 'bg-green-50 hover:bg-green-100' : 'bg-red-50 hover:bg-red-100'}`}
+                      onClick={() => setShowDetPel(p)}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold">{p.resultado === 'Ganó' ? '✅' : '❌'}</span>
+                        <span className="text-xs text-gray-500">{p.fecha}</span>
+                        <span className="text-xs">{p.duracion ? `${p.duracion}min` : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {p.como_fue && <span className="text-[10px] text-purple-600">{p.como_fue}</span>}
+                        <span className="text-xs font-medium">${p.dinero_jugado || 0}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Árbol modal */}
+      {showArbol && selected && (
+        <Modal title={`Árbol: ${selected.nombre || '#' + selected.numero_pinches}`} onClose={() => setShowArbol(false)} wide>
+          {(() => {
+            const abueloP = padre ? gallos.find(g => g.id === padre.padre_id) : null;
+            const abuelaP = padre ? gallos.find(g => g.id === padre.madre_id) : null;
+            const abueloM = madre ? gallos.find(g => g.id === madre.padre_id) : null;
+            const abuelaM = madre ? gallos.find(g => g.id === madre.madre_id) : null;
+
+            const hermanos = gallos.filter(g => {
+              if (g.id === selected.id) return false;
+              const cp = selected.padre_id && g.padre_id && selected.padre_id === g.padre_id;
+              const cm = selected.madre_id && g.madre_id && selected.madre_id === g.madre_id;
+              return cp || cm;
+            });
+            const hijos = gallos.filter(g => g.padre_id === selected.id || g.madre_id === selected.id);
+            const nietos = gallos.filter(g => hijos.some(h => h.id === g.padre_id || h.id === g.madre_id));
+
+            const N = ({ g, l, hi, sm }) => (
+              <div className={`border-2 rounded-lg p-2 text-center ${sm ? 'min-w-[80px]' : 'min-w-[90px]'} ${hi ? 'border-red-500 bg-red-50' : 'border-gray-200 bg-white'}`}>
+                <p className="text-[10px] text-gray-400 uppercase">{l}</p>
+                {g ? <><p className={`font-bold ${sm ? 'text-[11px]' : 'text-xs'} ${hi ? 'text-red-800' : 'text-gray-800'}`}>{g.nombre || 'Sin nombre'} {g.numero_pinches ? `(#${g.numero_pinches})` : ''}</p><p className={`text-[10px] ${hi ? 'text-red-600' : 'text-gray-500'}`}>{g.linea_genetica||''}</p></> : <p className="text-[10px] text-gray-400 italic">?</p>}
+              </div>
+            );
+            const SL = ({ text, count }) => (
+              <div className="flex items-center gap-2 justify-center mb-1">
+                <div className="h-px bg-gray-200 flex-1" /><span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{text} {count > 0 ? `(${count})` : ''}</span><div className="h-px bg-gray-200 flex-1" />
+              </div>
+            );
+            const Flecha = () => <div className="text-gray-300 text-xl text-center">↓</div>;
+
+            return (
+              <div className="overflow-x-auto">
+                <div className="min-w-[500px] flex flex-col items-center gap-3 py-4">
+                  <SL text="Abuelos" />
+                  <div className="flex gap-2 justify-center flex-wrap"><N g={abueloP} l="Ab. Pat." /><N g={abuelaP} l="Ab. Pat." /><N g={abueloM} l="Ab. Mat." /><N g={abuelaM} l="Ab. Mat." /></div>
+                  <Flecha />
+                  <SL text="Padres" />
+                  <div className="flex gap-6 justify-center"><N g={padre} l="Padre" /><N g={madre} l="Madre" /></div>
+                  <Flecha />
+                  <SL text={hermanos.length > 0 ? 'Gallo + Hermanos' : 'Gallo'} />
+                  <div className="flex gap-2 justify-center items-start flex-wrap">
+                    {hermanos.filter(h => { const cp = selected.padre_id && h.padre_id && selected.padre_id === h.padre_id; const cm = selected.madre_id && h.madre_id && selected.madre_id === h.madre_id; return cp && cm; }).map(h => <N key={h.id} g={h} l="Hermano" sm />)}
+                    <N g={selected} l="★ Seleccionado" hi />
+                    {hermanos.filter(h => { const cp = selected.padre_id && h.padre_id && selected.padre_id === h.padre_id; const cm = selected.madre_id && h.madre_id && selected.madre_id === h.madre_id; return !(cp && cm); }).map(h => <N key={h.id} g={h} l="Medio-Hno." sm />)}
+                  </div>
+                  {hijos.length > 0 && (<><Flecha /><SL text="Hijos y Descendientes" count={hijos.length} /><div className="flex gap-4 justify-center flex-wrap">{hijos.map(h => { const op = h.padre_id === selected.id ? gallos.find(x => x.id === h.madre_id) : gallos.find(x => x.id === h.padre_id); const nH = gallos.filter(n => n.padre_id === h.id || n.madre_id === h.id); return (<div key={h.id} className="flex flex-col items-center"><N g={h} l="Hijo/a" sm />{op && <p className="text-[9px] text-gray-400 mt-0.5">con {op.nombre || '#'+op.numero_pinches}</p>}{nH.length > 0 && (<div className="flex flex-col items-center mt-1"><div className="text-gray-300 text-xs">↓</div><div className="flex gap-1 flex-wrap justify-center">{nH.map(n => { const onP = n.padre_id === h.id ? gallos.find(x => x.id === n.madre_id) : gallos.find(x => x.id === n.padre_id); return (<div key={n.id} className="flex flex-col items-center"><N g={n} l="Nieto/a" sm />{onP && onP.id !== selected.id && <p className="text-[8px] text-gray-300">con {onP.nombre || '#'+onP.numero_pinches}</p>}</div>); })}</div></div>)}</div>); })}</div></>)}
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+      )}
+
+      {/* Detalle entrenamiento */}
+      {showDetEnt && (
+        <Modal title="Detalle Entrenamiento" onClose={() => setShowDetEnt(null)}>
+          <div className="space-y-2 text-sm">
+            <div className="grid grid-cols-2 gap-2">
+              <div><span className="text-gray-500">Fecha:</span> {showDetEnt.fecha}</div>
+              <div><span className="text-gray-500">Peso:</span> {showDetEnt.peso_libras}lb {showDetEnt.peso_onzas}oz</div>
+              <div><span className="text-gray-500">Corrida+Chata:</span> {showDetEnt.corrida||0}+{showDetEnt.chata||0}min</div>
+              <div><span className="text-gray-500">Clima:</span> {showDetEnt.clima} {showDetEnt.temperatura ? `${showDetEnt.temperatura}°F` : ''}</div>
+              <div><span className="text-gray-500">Intensidad:</span> {showDetEnt.intensidad}</div>
+              <div><span className="text-gray-500">Ánimo:</span> {showDetEnt.animo_gallo}</div>
+              <div><span className="text-gray-500">Desempeño:</span> <span className={`px-1.5 py-0.5 rounded ${desempenoColor(showDetEnt.desempeno_general)}`}>{showDetEnt.desempeno_general}</span></div>
+              <div><span className="text-gray-500">Velocidad:</span> {showDetEnt.velocidad}</div>
+            </div>
+            {showDetEnt.observaciones && <p className="border-t pt-2 text-gray-600">{showDetEnt.observaciones}</p>}
+          </div>
+        </Modal>
+      )}
+
+      {/* Detalle pelea */}
+      {showDetPel && (
+        <Modal title="Detalle Pelea" onClose={() => setShowDetPel(null)}>
+          <div className="space-y-2 text-sm">
+            <div className={`p-2 rounded text-center font-bold ${showDetPel.resultado === 'Ganó' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+              {showDetPel.resultado === 'Ganó' ? '✅ GANÓ' : '❌ PERDIÓ'}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><span className="text-gray-500">Fecha:</span> {showDetPel.fecha}</div>
+              <div><span className="text-gray-500">Lugar:</span> {showDetPel.lugar || 'N/A'}</div>
+              <div><span className="text-gray-500">Duración:</span> {showDetPel.duracion || '?'}min</div>
+              <div><span className="text-gray-500">Dinero:</span> ${showDetPel.dinero_jugado||0} {showDetPel.moneda}</div>
+              <div><span className="text-gray-500">Cómo fue:</span> {showDetPel.como_fue || 'N/A'}</div>
+              <div><span className="text-gray-500">Armador:</span> {showDetPel.armador || 'N/A'}</div>
+            </div>
+            {showDetPel.puntos_positivos && <p className="border-t pt-2 text-green-700">+ {showDetPel.puntos_positivos}</p>}
+            {showDetPel.puntos_negativos && <p className="text-red-700">- {showDetPel.puntos_negativos}</p>}
+            {showDetPel.lesiones && <p className="border-t pt-2 text-red-700">Lesiones: {showDetPel.lesiones}</p>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// APP PRINCIPAL
+// ============================================
+const App = () => {
+  const [tab, setTab] = useState('dashboard');
+  const [gallos, setGallos] = useState([]);
+  const [opciones, setOpciones] = useState([]);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [dbError, setDbError] = useState(null);
+
+  const toast = (msg, type = 'info') => setToastMsg({ msg, type });
+
+  const loadGallos = async () => {
+    const { data, error } = await supabase.from('gallos').select('*').order('nombre');
+    if (error) { setDbError(error.message); return; }
+    setGallos(data || []);
+  };
+
+  const loadOpciones = async () => {
+    const { data } = await supabase.from('opciones_dinamicas').select('*').order('valor');
+    setOpciones(data || []);
+  };
+
+  const addOpcion = async (tipo, valor) => {
+    const { error } = await supabase.from('opciones_dinamicas').insert({ tipo, valor });
+    if (!error) await loadOpciones();
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      await Promise.all([loadGallos(), loadOpciones()]);
+      setLoading(false);
+    };
+    init();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-gray-500">Conectando a base de datos...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (dbError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+        <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full text-center">
+          <p className="text-4xl mb-4">⚠️</p>
+          <h2 className="text-lg font-bold text-gray-800 mb-2">Error de conexión</h2>
+          <p className="text-sm text-gray-500 mb-4">{dbError}</p>
+          <p className="text-xs text-gray-400 mb-4">Asegúrate de haber ejecutado el SQL de setup en tu Supabase Dashboard (SQL Editor).</p>
+          <button onClick={() => window.location.reload()} className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium">Reintentar</button>
+        </div>
+      </div>
+    );
+  }
+
+  const tabs = [
+    { id: 'dashboard', label: 'Inicio', icon: '📊' },
+    { id: 'genetica', label: 'Genética', icon: '🧬' },
+    { id: 'entrenamientos', label: 'Entreno', icon: '🏋️' },
+    { id: 'peleas', label: 'Peleas', icon: '⚔️' },
+  ];
+
+  return (
+    <AppContext.Provider value={{ gallos, loadGallos, opciones, loadOpciones, addOpcion, toast }}>
+      <div className="min-h-screen bg-gray-100 pb-20 md:pb-4">
+        {/* Header */}
+        <header className="bg-gradient-to-r from-red-700 to-red-600 text-white px-4 py-3 shadow-lg sticky top-0 z-30">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-bold">GallosPR</h1>
+              <p className="text-[10px] text-red-200">Sistema de Gestión</p>
+            </div>
+            {/* Desktop tabs */}
+            <div className="hidden md:flex gap-1">
+              {tabs.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    tab === t.id ? 'bg-white/20 text-white' : 'text-red-200 hover:text-white hover:bg-white/10'
+                  }`}>
+                  {t.icon} {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="max-w-4xl mx-auto p-4">
+          {tab === 'dashboard' && <DashboardModule />}
+          {tab === 'genetica' && <GeneticaModule />}
+          {tab === 'entrenamientos' && <EntrenamientosModule />}
+          {tab === 'peleas' && <PeleasModule />}
+        </main>
+
+        {/* Mobile bottom nav */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 safe-area-bottom">
+          <div className="flex">
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition ${
+                  tab === t.id ? 'text-red-600' : 'text-gray-400'
+                }`}>
+                <span className="text-lg">{t.icon}</span>
+                <span className="text-[10px] font-medium">{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        {/* Toast */}
+        {toastMsg && <Toast message={toastMsg.msg} type={toastMsg.type} onClose={() => setToastMsg(null)} />}
+      </div>
+    </AppContext.Provider>
+  );
+};
+
+ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
