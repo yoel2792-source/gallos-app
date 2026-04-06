@@ -1348,19 +1348,82 @@ const DashboardModule = () => {
       {/* Detalle entrenamiento */}
       {showDetEnt && (
         <Modal title="Detalle Entrenamiento" onClose={() => setShowDetEnt(null)}>
-          <div className="space-y-2 text-sm">
-            <div className="grid grid-cols-2 gap-2">
-              <div><span className="text-gray-500">Fecha:</span> {showDetEnt.fecha}</div>
-              <div><span className="text-gray-500">Peso:</span> {showDetEnt.peso_libras}lb {showDetEnt.peso_onzas}oz</div>
-              <div><span className="text-gray-500">Corrida+Chata:</span> {showDetEnt.corrida||0}+{showDetEnt.chata||0}min</div>
-              <div><span className="text-gray-500">Clima:</span> {showDetEnt.clima} {showDetEnt.temperatura ? `${showDetEnt.temperatura}°F` : ''}</div>
-              <div><span className="text-gray-500">Intensidad:</span> {showDetEnt.intensidad}</div>
-              <div><span className="text-gray-500">Ánimo:</span> {showDetEnt.animo_gallo}</div>
-              <div><span className="text-gray-500">Desempeño:</span> <span className={`px-1.5 py-0.5 rounded ${desempenoColor(showDetEnt.desempeno_general)}`}>{showDetEnt.desempeno_general}</span></div>
-              <div><span className="text-gray-500">Velocidad:</span> {showDetEnt.velocidad}</div>
+          {(() => { const e = showDetEnt; return (
+            <div className="space-y-3 text-sm">
+              {/* Fecha y Peso */}
+              <div className="grid grid-cols-2 gap-2">
+                <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{e.fecha}</span></div>
+                <div><span className="text-gray-500">Peso:</span> <span className="font-medium">{e.peso_libras}lb {e.peso_onzas}oz</span></div>
+              </div>
+
+              {/* Duración */}
+              <div className="border-t pt-2">
+                <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Duración</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div><span className="text-gray-500">Corrida:</span> <span className="font-medium">{e.corrida || 0} min</span></div>
+                  <div><span className="text-gray-500">Chata:</span> <span className="font-medium">{e.chata || 0} min</span></div>
+                  <div><span className="text-gray-500">Total:</span> <span className="font-medium">{(parseFloat(e.corrida||0) + parseFloat(e.chata||0)).toFixed(0)} min</span></div>
+                </div>
+              </div>
+
+              {/* Condiciones del Día */}
+              <div className="border-t pt-2">
+                <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Condiciones del Día</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><span className="text-gray-500">Clima:</span> <span className="font-medium">{e.clima}</span></div>
+                  <div><span className="text-gray-500">Temperatura:</span> <span className="font-medium">{e.temperatura ? `${e.temperatura}°F` : 'N/A'}</span></div>
+                  <div><span className="text-gray-500">Tomó Sol:</span> <span className="font-medium">{e.tomo_sol}</span></div>
+                  <div><span className="text-gray-500">Intensidad:</span> <span className="font-medium">{e.intensidad}</span></div>
+                </div>
+              </div>
+
+              {/* Ánimo y Condición */}
+              <div className="border-t pt-2">
+                <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Ánimo y Condición Física</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><span className="text-gray-500">Ánimo:</span> <span className="font-medium">{e.animo_gallo}</span></div>
+                  <div><span className="text-gray-500">Plumas General:</span> <span className="font-medium">{e.condicion_plumeras_general}</span></div>
+                  <div><span className="text-gray-500">Plumas Alas:</span> <span className="font-medium">{e.condicion_plumeras_alas}</span></div>
+                  <div><span className="text-gray-500">Plumas Rabos:</span> <span className="font-medium">{e.condicion_plumeras_rabos}</span></div>
+                  <div><span className="text-gray-500">Problemas Alas:</span> <span className="font-medium">{e.problemas_alas}</span></div>
+                  <div><span className="text-gray-500">Pico:</span> <span className="font-medium">{e.condicion_pico}</span></div>
+                  <div><span className="text-gray-500">Espuelas:</span> <span className="font-medium">{e.condicion_espuelas}</span></div>
+                </div>
+              </div>
+
+              {/* Nutrición */}
+              <div className="border-t pt-2">
+                <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Nutrición y Medicinas</p>
+                {e.nutricion_items && e.nutricion_items.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 mb-2">{e.nutricion_items.map(n => <span key={n} className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">{n}</span>)}</div>
+                ) : <p className="text-gray-400 text-xs mb-2">Sin nutrición registrada</p>}
+                <div className="space-y-1">
+                  <div><span className="text-gray-500">Desparasitante:</span> <span className="font-medium">{e.desparasitante || 'N/A'}</span></div>
+                  <div><span className="text-gray-500">Medicinas:</span> <span className="font-medium">{e.medicinas_especiales || 'N/A'}</span></div>
+                  <div><span className="text-gray-500">Alimentación Especial:</span> <span className="font-medium">{e.alimentacion_especial || 'N/A'}</span></div>
+                </div>
+              </div>
+
+              {/* Desempeño */}
+              <div className="border-t pt-2">
+                <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Desempeño</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div><span className="text-gray-500">General:</span> <span className={`font-medium px-1.5 py-0.5 rounded ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span></div>
+                  <div><span className="text-gray-500">Velocidad:</span> <span className="font-medium">{e.velocidad}</span></div>
+                  <div><span className="text-gray-500">Resistencia:</span> <span className="font-medium">{e.resistencia}</span></div>
+                </div>
+                {e.razon_malo && <p className="mt-1 text-red-600">Razón: {e.razon_malo}</p>}
+              </div>
+
+              {/* Observaciones */}
+              {e.observaciones && (
+                <div className="border-t pt-2">
+                  <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Observaciones</p>
+                  <p className="text-gray-700 bg-gray-50 p-2 rounded">{e.observaciones}</p>
+                </div>
+              )}
             </div>
-            {showDetEnt.observaciones && <p className="border-t pt-2 text-gray-600">{showDetEnt.observaciones}</p>}
-          </div>
+          ); })()}
         </Modal>
       )}
 
