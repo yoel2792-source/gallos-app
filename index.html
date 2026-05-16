@@ -234,7 +234,7 @@ const GeneticaModule = () => {
   const [viewingPhoto, setViewingPhoto] = useState(null);
 
   const emptyForm = {
-    numero_pinches: '', nombre: '', sexo: 'Gallo', amarrado: false,
+    numero_pinches: '', nombre: '', sexo: 'Gallo', amarrado: false, jaula: '',
     fecha_nacimiento: '', color: '', linea_genetica: '',
     padre_id: null, madre_id: null, caracteristicas: [], observaciones: '',
     foto: null
@@ -267,6 +267,7 @@ const GeneticaModule = () => {
       numero_pinches: form.numero_pinches ? parseInt(form.numero_pinches) : null,
       sexo: form.sexo,
       amarrado: form.amarrado,
+      jaula: form.amarrado ? (form.jaula || null) : null,
       fecha_nacimiento: form.fecha_nacimiento || null,
       color: form.color || null,
       linea_genetica: form.linea_genetica || null,
@@ -304,6 +305,7 @@ const GeneticaModule = () => {
       nombre: gallo.nombre || '',
       sexo: gallo.sexo || 'Gallo',
       amarrado: gallo.amarrado || false,
+      jaula: gallo.jaula || '',
       fecha_nacimiento: gallo.fecha_nacimiento || '',
       color: gallo.color || '',
       linea_genetica: gallo.linea_genetica || '',
@@ -523,7 +525,7 @@ const GeneticaModule = () => {
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-gray-800 truncate">{g.nombre || 'Sin nombre'}</span>
                   {g.numero_pinches && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">#{g.numero_pinches}</span>}
-                  {g.amarrado && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado</span>}
+                  {g.amarrado && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado{g.jaula ? ` • Jaula ${g.jaula}` : ''}</span>}
                   <span className="text-xs text-gray-400">{g.sexo === 'Gallina' ? '♀' : '♂'}</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -571,9 +573,15 @@ const GeneticaModule = () => {
               </Field>
               <Field label="Amarrado">
                 <Select value={form.amarrado ? 'Sí' : 'No'}
-                  onChange={e => setForm({...form, amarrado: e.target.value === 'Sí'})}
+                  onChange={e => setForm({...form, amarrado: e.target.value === 'Sí', jaula: e.target.value === 'No' ? '' : form.jaula})}
                   options={[{value: 'No', label: 'No'}, {value: 'Sí', label: 'Sí'}]} />
               </Field>
+              {form.amarrado && (
+                <Field label="Jaula #">
+                  <Input type="number" placeholder="Ej: 5" value={form.jaula}
+                    onChange={e => setForm({...form, jaula: e.target.value})} />
+                </Field>
+              )}
               <Field label="Nacimiento">
                 <Input type="date" value={form.fecha_nacimiento}
                   onChange={e => setForm({...form, fecha_nacimiento: e.target.value})} />
@@ -1405,7 +1413,7 @@ const DashboardModule = () => {
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-gray-800">{g.nombre || 'Sin nombre'}</span>
                           {g.numero_pinches && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">#{g.numero_pinches}</span>}
-                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado</span>
+                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado{g.jaula ? ` • Jaula ${g.jaula}` : ''}</span>
                           <span className="text-xs text-gray-400">{g.sexo === 'Gallina' ? '♀' : '♂'}</span>
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">
