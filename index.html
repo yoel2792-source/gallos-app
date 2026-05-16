@@ -91,6 +91,17 @@ const Select = ({ options, ...props }) => (
 );
 const Textarea = (props) => <textarea {...props} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none h-20" />;
 
+// Componente visor de foto (lightbox)
+const PhotoViewer = ({ src, onClose }) => {
+  if (!src) return null;
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 bg-white/20 text-white rounded-full text-2xl flex items-center justify-center hover:bg-white/40">✕</button>
+      <img src={src} className="max-w-full max-h-[85vh] object-contain rounded-lg" onClick={e => e.stopPropagation()} />
+    </div>
+  );
+};
+
 // Componente para subir una foto (perfil del gallo)
 const PhotoUpload = ({ value, onChange, label }) => {
   const fileRef = useRef();
@@ -220,6 +231,7 @@ const GeneticaModule = () => {
   const [editingGallo, setEditingGallo] = useState(null);
   const [showArbol, setShowArbol] = useState(null);
   const [searchQ, setSearchQ] = useState('');
+  const [viewingPhoto, setViewingPhoto] = useState(null);
 
   const emptyForm = {
     numero_pinches: '', nombre: '', sexo: 'Gallo', amarrado: false,
@@ -506,7 +518,7 @@ const GeneticaModule = () => {
         ) : filteredGallos.map(g => (
           <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 active:bg-gray-50">
             <div className="flex items-start justify-between">
-              {g.foto && <img src={g.foto} className="w-12 h-12 rounded-lg object-cover mr-3 flex-shrink-0 cursor-pointer" onClick={() => handleEdit(g)} />}
+              {g.foto && <img src={g.foto} className="w-12 h-12 rounded-lg object-cover mr-3 flex-shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); setViewingPhoto(g.foto); }} />}
               <div className="flex-1 min-w-0" onClick={() => handleEdit(g)}>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-gray-800 truncate">{g.nombre || 'Sin nombre'}</span>
@@ -535,6 +547,7 @@ const GeneticaModule = () => {
 
       {/* Modal Árbol */}
       {showArbol && <ArbolModal gallo={showArbol} />}
+      <PhotoViewer src={viewingPhoto} onClose={() => setViewingPhoto(null)} />
 
       {/* Modal Formulario */}
       {showForm && (
@@ -1235,6 +1248,7 @@ const DashboardModule = () => {
   const [showArbol, setShowArbol] = useState(false);
   const [showDetEnt, setShowDetEnt] = useState(null);
   const [showDetPel, setShowDetPel] = useState(null);
+  const [viewingPhoto, setViewingPhoto] = useState(null);
 
   const loadData = async (gallo) => {
     setSelected(gallo);
@@ -1273,7 +1287,7 @@ const DashboardModule = () => {
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3">
-                {selected.foto && <img src={selected.foto} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />}
+                {selected.foto && <img src={selected.foto} className="w-16 h-16 rounded-lg object-cover flex-shrink-0 cursor-pointer" onClick={() => setViewingPhoto(selected.foto)} />}
                 <div>
                   <h3 className="text-lg font-bold text-gray-800">{selected.nombre || 'Sin nombre'}</h3>
                   <p className="text-sm text-gray-500">
@@ -1386,7 +1400,7 @@ const DashboardModule = () => {
                   <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:border-red-300 active:bg-gray-50 transition"
                     onClick={() => loadData(g)}>
                     <div className="flex items-start justify-between">
-                      {g.foto && <img src={g.foto} className="w-14 h-14 rounded-lg object-cover mr-3 flex-shrink-0" />}
+                      {g.foto && <img src={g.foto} className="w-14 h-14 rounded-lg object-cover mr-3 flex-shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); setViewingPhoto(g.foto); }} />}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-gray-800">{g.nombre || 'Sin nombre'}</span>
@@ -1574,6 +1588,7 @@ const DashboardModule = () => {
           </div>
         </Modal>
       )}
+      <PhotoViewer src={viewingPhoto} onClose={() => setViewingPhoto(null)} />
     </div>
   );
 };
