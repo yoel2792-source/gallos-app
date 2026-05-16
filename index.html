@@ -824,7 +824,7 @@ const EntrenamientosModule = () => {
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {e.fecha} • {e.peso_libras}lb {e.peso_onzas}oz
-                    {e.corrida || e.chata ? ` • ${(parseFloat(e.corrida||0) + parseFloat(e.chata||0)).toFixed(0)}min` : ''}
+                    {e.corrida ? ` • ${e.corrida}min corrida` : ''}{e.chata ? ` • ${e.chata}min chata` : ''}
                   </p>
                 </div>
                 <div className="flex gap-1">
@@ -846,7 +846,7 @@ const EntrenamientosModule = () => {
                 <div><span className="text-gray-500">Gallo:</span> <span className="font-medium">{e.gallos?.nombre || '#'+ e.gallos?.numero_pinches}</span></div>
                 <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{e.fecha}</span></div>
                 <div><span className="text-gray-500">Peso:</span> <span className="font-medium">{e.peso_libras}lb {e.peso_onzas}oz</span></div>
-                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{e.corrida || 0} + {e.chata || 0} min</span></div>
+                <div><span className="text-gray-500">Corrida:</span> <span className="font-medium">{e.corrida || 0} min</span> <span className="text-gray-500 ml-2">Chata:</span> <span className="font-medium">{e.chata || 0} min</span></div>
                 <div><span className="text-gray-500">Clima:</span> <span className="font-medium">{e.clima}</span></div>
                 <div><span className="text-gray-500">Temp:</span> <span className="font-medium">{e.temperatura || 'N/A'}°F</span></div>
                 <div><span className="text-gray-500">Sol:</span> <span className="font-medium">{e.tomo_sol}</span></div>
@@ -1118,7 +1118,7 @@ const PeleasModule = () => {
                     <span className={`text-xs font-bold ${p.resultado === 'Ganó' ? 'text-green-700' : 'text-red-700'}`}>{p.resultado === 'Ganó' ? '✅' : '❌'} {p.resultado}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {p.fecha} {p.lugar ? `• ${p.lugar}` : ''} {p.duracion ? `• ${p.duracion}:${String(p.duracion_segundos||0).padStart(2,'0')}` : ''} {p.dinero_jugado ? `• $${p.dinero_jugado}` : ''}
+                    {p.fecha} {p.lugar ? `• ${p.lugar}` : ''} {(p.duracion || p.duracion_segundos) ? `• ${p.duracion ? p.duracion + ':' + String(p.duracion_segundos||0).padStart(2,'0') : p.duracion_segundos + 'seg'}` : ''} {p.dinero_jugado ? `• $${p.dinero_jugado}` : ''}
                   </p>
                   {p.como_fue && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded mt-1 inline-block">{p.como_fue}</span>}
                 </div>
@@ -1144,7 +1144,7 @@ const PeleasModule = () => {
                 <div><span className="text-gray-500">Gallo:</span> <span className="font-medium">{p.gallos?.nombre}</span></div>
                 <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{p.fecha}</span></div>
                 <div><span className="text-gray-500">Lugar:</span> <span className="font-medium">{p.lugar || 'N/A'}</span></div>
-                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{p.duracion || '0'}:{String(p.duracion_segundos||0).padStart(2,'0')}</span></div>
+                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{p.duracion ? p.duracion + ':' + String(p.duracion_segundos||0).padStart(2,'0') : (p.duracion_segundos ? p.duracion_segundos + ' seg' : 'N/A')}</span></div>
                 <div><span className="text-gray-500">Dinero:</span> <span className="font-medium">${p.dinero_jugado || 0}</span></div>
                 <div><span className="text-gray-500">Cómo fue:</span> <span className="font-medium">{p.como_fue || 'N/A'}</span></div>
                 <div><span className="text-gray-500">Oponente:</span> <span className="font-medium">{p.duenio_oponente || 'N/A'}</span></div>
@@ -1344,7 +1344,7 @@ const DashboardModule = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500 w-20">{e.fecha}</span>
                         <span className="text-xs font-medium">{e.peso_libras}lb {e.peso_onzas}oz</span>
-                        {(e.corrida || e.chata) && <span className="text-xs text-gray-400">{(parseFloat(e.corrida||0)+parseFloat(e.chata||0)).toFixed(0)}min</span>}
+                        {e.corrida && <span className="text-xs text-gray-400">{e.corrida}' corr</span>}{e.chata && <span className="text-xs text-blue-400 ml-1">{e.chata}' chat</span>}
                       </div>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
                     </div>
@@ -1366,7 +1366,7 @@ const DashboardModule = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold">{p.resultado === 'Ganó' ? '✅' : '❌'}</span>
                         <span className="text-xs text-gray-500">{p.fecha}</span>
-                        <span className="text-xs">{p.duracion ? `${p.duracion}:${String(p.duracion_segundos||0).padStart(2,'0')}` : ''}</span>
+                        <span className="text-xs">{p.duracion ? `${p.duracion}:${String(p.duracion_segundos||0).padStart(2,'0')}` : (p.duracion_segundos ? `${p.duracion_segundos}seg` : '')}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {p.como_fue && <span className="text-[10px] text-purple-600">{p.como_fue}</span>}
@@ -1502,7 +1502,7 @@ const DashboardModule = () => {
                 <div className="grid grid-cols-3 gap-2">
                   <div><span className="text-gray-500">Corrida:</span> <span className="font-medium">{e.corrida || 0} min</span></div>
                   <div><span className="text-gray-500">Chata:</span> <span className="font-medium">{e.chata || 0} min</span></div>
-                  <div><span className="text-gray-500">Total:</span> <span className="font-medium">{(parseFloat(e.corrida||0) + parseFloat(e.chata||0)).toFixed(0)} min</span></div>
+                  <div><span className="text-gray-500">Corrida:</span> <span className="font-medium">{e.corrida || 0} min</span> <span className="text-gray-500 ml-2">Chata:</span> <span className="font-medium">{e.chata || 0} min</span></div>
                 </div>
               </div>
 
@@ -1577,7 +1577,7 @@ const DashboardModule = () => {
             <div className="grid grid-cols-2 gap-2">
               <div><span className="text-gray-500">Fecha:</span> {showDetPel.fecha}</div>
               <div><span className="text-gray-500">Lugar:</span> {showDetPel.lugar || 'N/A'}</div>
-              <div><span className="text-gray-500">Duración:</span> {showDetPel.duracion || '0'}:{String(showDetPel.duracion_segundos||0).padStart(2,'0')}</div>
+              <div><span className="text-gray-500">Duración:</span> {showDetPel.duracion ? showDetPel.duracion + ':' + String(showDetPel.duracion_segundos||0).padStart(2,'0') : (showDetPel.duracion_segundos ? showDetPel.duracion_segundos + ' seg' : 'N/A')}</div>
               <div><span className="text-gray-500">Dinero:</span> ${showDetPel.dinero_jugado||0}</div>
               <div><span className="text-gray-500">Cómo fue:</span> {showDetPel.como_fue || 'N/A'}</div>
               <div><span className="text-gray-500">Armador:</span> {showDetPel.armador || 'N/A'}</div>
