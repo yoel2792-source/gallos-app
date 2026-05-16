@@ -91,6 +91,68 @@ const Select = ({ options, ...props }) => (
 );
 const Textarea = (props) => <textarea {...props} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none h-20" />;
 
+// Componente para subir una foto (perfil del gallo)
+const PhotoUpload = ({ value, onChange, label }) => {
+  const fileRef = useRef();
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert('La imagen debe ser menor a 2MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => onChange(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div>
+      <p className="text-sm font-medium text-gray-700 mb-1">{label || 'Foto'}</p>
+      {value ? (
+        <div className="relative inline-block">
+          <img src={value} className="w-24 h-24 object-cover rounded-lg border-2 border-gray-200" />
+          <button onClick={() => onChange(null)} className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center">✕</button>
+        </div>
+      ) : (
+        <button onClick={() => fileRef.current.click()} className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center text-gray-400 hover:border-red-400 hover:text-red-400 transition">
+          <span className="text-2xl">📷</span>
+          <span className="text-[10px] mt-1">Agregar</span>
+        </button>
+      )}
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+    </div>
+  );
+};
+
+// Componente para subir múltiples fotos (entrenamientos)
+const MultiPhotoUpload = ({ values, onChange, label }) => {
+  const fileRef = useRef();
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert('La imagen debe ser menor a 2MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => onChange([...(values || []), ev.target.result]);
+    reader.readAsDataURL(file);
+  };
+  const removeAt = (i) => onChange(values.filter((_, idx) => idx !== i));
+  return (
+    <div>
+      <p className="text-sm font-medium text-gray-700 mb-1">{label || 'Fotos'}</p>
+      <div className="flex gap-2 flex-wrap">
+        {(values || []).map((src, i) => (
+          <div key={i} className="relative">
+            <img src={src} className="w-20 h-20 object-cover rounded-lg border-2 border-gray-200" />
+            <button onClick={() => removeAt(i)} className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center">✕</button>
+          </div>
+        ))}
+        <button onClick={() => fileRef.current.click()} className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center text-gray-400 hover:border-green-400 hover:text-green-400 transition">
+          <span className="text-xl">📷</span>
+          <span className="text-[9px]">+ Foto</span>
+        </button>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+    </div>
+  );
+};
+
 // ============================================
 // COMPONENTE: Búsqueda de Gallo (reutilizable)
 // ============================================
@@ -162,7 +224,8 @@ const GeneticaModule = () => {
   const emptyForm = {
     numero_pinches: '', nombre: '', sexo: 'Gallo', amarrado: false,
     fecha_nacimiento: '', color: '', linea_genetica: '',
-    padre_id: null, madre_id: null, caracteristicas: [], observaciones: ''
+    padre_id: null, madre_id: null, caracteristicas: [], observaciones: '',
+    foto: null
   };
   const [form, setForm] = useState(emptyForm);
   const [padreSelected, setPadreSelected] = useState(null);
@@ -198,7 +261,8 @@ const GeneticaModule = () => {
       padre_id: form.padre_id,
       madre_id: form.madre_id,
       caracteristicas: form.caracteristicas,
-      observaciones: form.observaciones || null
+      observaciones: form.observaciones || null,
+      foto: form.foto || null
     };
 
     let error;
@@ -234,7 +298,8 @@ const GeneticaModule = () => {
       padre_id: gallo.padre_id,
       madre_id: gallo.madre_id,
       caracteristicas: gallo.caracteristicas || [],
-      observaciones: gallo.observaciones || ''
+      observaciones: gallo.observaciones || '',
+      foto: gallo.foto || null
     });
     const padre = gallos.find(g => g.id === gallo.padre_id);
     const madre = gallos.find(g => g.id === gallo.madre_id);
@@ -441,6 +506,7 @@ const GeneticaModule = () => {
         ) : filteredGallos.map(g => (
           <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 active:bg-gray-50">
             <div className="flex items-start justify-between">
+              {g.foto && <img src={g.foto} className="w-12 h-12 rounded-lg object-cover mr-3 flex-shrink-0 cursor-pointer" onClick={() => handleEdit(g)} />}
               <div className="flex-1 min-w-0" onClick={() => handleEdit(g)}>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-gray-800 truncate">{g.nombre || 'Sin nombre'}</span>
@@ -549,6 +615,11 @@ const GeneticaModule = () => {
               </div>
             </div>
 
+            {/* Foto del gallo */}
+            <div className="border-t pt-3">
+              <PhotoUpload value={form.foto} onChange={(v) => setForm({...form, foto: v})} label="Foto del Gallo" />
+            </div>
+
             <Field label="Observaciones">
               <Textarea placeholder="Notas adicionales..." value={form.observaciones}
                 onChange={e => setForm({...form, observaciones: e.target.value})} />
@@ -588,21 +659,50 @@ const EntrenamientosModule = () => {
     condicion_plumeras_alas: 'Buena', condicion_plumeras_rabos: 'Buena',
     problemas_alas: 'No', condicion_pico: 'Normal', condicion_espuelas: 'Sanas',
     nutricion_items: [], desparasitante: '', medicinas_especiales: '', alimentacion_especial: '',
-    desempeno_general: 'Bueno', velocidad: 'Normal', resistencia: 'Buena', razon_malo: '', observaciones: ''
+    desempeno_general: 'Bueno', velocidad: 'Normal', resistencia: 'Buena', razon_malo: '', observaciones: '',
+    fotos: []
   };
   const [form, setForm] = useState(emptyForm);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [galloSelected, setGalloSelected] = useState(null);
+
+  // Calcular rango de semana basado en offset
+  const getWeekRange = (offset) => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) + (offset * 7));
+    monday.setHours(0,0,0,0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23,59,59,999);
+    return { start: monday, end: sunday };
+  };
+
+  const weekRange = useMemo(() => getWeekRange(weekOffset), [weekOffset]);
+  const weekLabel = useMemo(() => {
+    const s = weekRange.start;
+    const e = weekRange.end;
+    const fmt = (d) => `${d.getDate()}/${d.getMonth()+1}`;
+    if (weekOffset === 0) return `Esta semana (${fmt(s)} - ${fmt(e)})`;
+    if (weekOffset === -1) return `Semana pasada (${fmt(s)} - ${fmt(e)})`;
+    return `${fmt(s)} - ${fmt(e)}`;
+  }, [weekRange, weekOffset]);
 
   const loadEntrenamientos = async () => {
     setLoading(true);
-    let query = supabase.from('entrenamientos').select('*, gallos(nombre, numero_pinches)').order('fecha', { ascending: false }).limit(100);
+    const startStr = weekRange.start.toISOString().split('T')[0];
+    const endStr = weekRange.end.toISOString().split('T')[0];
+    let query = supabase.from('entrenamientos').select('*, gallos(nombre, numero_pinches, foto)')
+      .gte('fecha', startStr).lte('fecha', endStr)
+      .order('fecha', { ascending: false });
     if (galloFilter) query = query.eq('gallo_id', galloFilter.id);
     const { data, error } = await query;
     if (!error) setEntrenamientos(data || []);
     setLoading(false);
   };
 
-  useEffect(() => { loadEntrenamientos(); }, [galloFilter]);
+  useEffect(() => { loadEntrenamientos(); }, [galloFilter, weekOffset]);
 
   const handleSave = async () => {
     if (!form.gallo_id) { toast('Selecciona un gallo', 'error'); return; }
@@ -685,6 +785,17 @@ const EntrenamientosModule = () => {
           placeholder="Filtrar por gallo..." filter={g => g.amarrado} />
       </div>
 
+      {/* Navegación por semanas */}
+      <div className="flex items-center justify-between bg-white rounded-lg border border-gray-200 p-2 mb-4">
+        <button onClick={() => setWeekOffset(w => w - 1)} className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-medium">← Anterior</button>
+        <div className="text-center">
+          <p className="text-sm font-bold text-gray-800">{weekLabel}</p>
+          <p className="text-[10px] text-gray-400">{entrenamientos.length} entrenamientos</p>
+        </div>
+        <button onClick={() => setWeekOffset(w => w < 0 ? w + 1 : 0)} disabled={weekOffset >= 0}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${weekOffset >= 0 ? 'bg-gray-50 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>Siguiente →</button>
+      </div>
+
       {/* Lista */}
       {loading ? <p className="text-center text-gray-400 py-8">Cargando...</p> : (
         <div className="space-y-2">
@@ -751,6 +862,12 @@ const EntrenamientosModule = () => {
               )}
               {e.razon_malo && <div className="border-t pt-2"><p className="text-gray-500">Razón malo: <span className="text-red-700">{e.razon_malo}</span></p></div>}
               {e.observaciones && <div className="border-t pt-2"><p className="text-gray-500">Observaciones: <span className="text-gray-800">{e.observaciones}</span></p></div>}
+              {e.fotos && e.fotos.length > 0 && (
+                <div className="border-t pt-2">
+                  <p className="text-gray-500 mb-2">Fotos:</p>
+                  <div className="flex gap-2 flex-wrap">{e.fotos.map((src, i) => <img key={i} src={src} className="w-24 h-24 object-cover rounded-lg border-2 border-gray-200" />)}</div>
+                </div>
+              )}
             </div>
           ); })()}
         </Modal>
@@ -842,6 +959,11 @@ const EntrenamientosModule = () => {
 
             <Field label="Observaciones"><Textarea value={form.observaciones} onChange={e => setForm({...form, observaciones: e.target.value})} /></Field>
 
+            {/* Fotos del entrenamiento */}
+            <div className="border-t pt-3">
+              <MultiPhotoUpload values={form.fotos} onChange={(v) => setForm({...form, fotos: v})} label="Fotos del Entrenamiento" />
+            </div>
+
             <button onClick={handleSave} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700">
               {editingId ? 'Actualizar' : 'Guardar'} Entrenamiento
             </button>
@@ -869,7 +991,7 @@ const PeleasModule = () => {
   const emptyForm = {
     gallo_id: null, fecha: new Date().toISOString().split('T')[0], lugar: '',
     duenio_oponente: '', peso_oponente_libras: '', peso_oponente_onzas: '', estilo_oponente: '',
-    armador: '', resultado: 'Ganó', duracion: '', dinero_jugado: '', moneda: 'USD',
+    armador: '', resultado: 'Ganó', duracion: '', duracion_segundos: '0', dinero_jugado: '',
     como_fue: '', estilo_observado: '', puntos_positivos: '', puntos_negativos: '', lesiones: ''
   };
   const [form, setForm] = useState(emptyForm);
@@ -895,7 +1017,9 @@ const PeleasModule = () => {
       peso_oponente_libras: form.peso_oponente_libras ? parseInt(form.peso_oponente_libras) : null,
       peso_oponente_onzas: form.peso_oponente_onzas ? parseInt(form.peso_oponente_onzas) : null,
       duracion: form.duracion ? parseInt(form.duracion) : null,
+      duracion_segundos: form.duracion_segundos ? parseInt(form.duracion_segundos) : 0,
       dinero_jugado: form.dinero_jugado ? parseFloat(form.dinero_jugado) : null,
+      moneda: 'USD',
     };
 
     let error;
@@ -981,7 +1105,7 @@ const PeleasModule = () => {
                     <span className={`text-xs font-bold ${p.resultado === 'Ganó' ? 'text-green-700' : 'text-red-700'}`}>{p.resultado === 'Ganó' ? '✅' : '❌'} {p.resultado}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {p.fecha} {p.lugar ? `• ${p.lugar}` : ''} {p.duracion ? `• ${p.duracion}min` : ''} {p.dinero_jugado ? `• $${p.dinero_jugado} ${p.moneda}` : ''}
+                    {p.fecha} {p.lugar ? `• ${p.lugar}` : ''} {p.duracion ? `• ${p.duracion}:${String(p.duracion_segundos||0).padStart(2,'0')}` : ''} {p.dinero_jugado ? `• $${p.dinero_jugado}` : ''}
                   </p>
                   {p.como_fue && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded mt-1 inline-block">{p.como_fue}</span>}
                 </div>
@@ -1007,8 +1131,8 @@ const PeleasModule = () => {
                 <div><span className="text-gray-500">Gallo:</span> <span className="font-medium">{p.gallos?.nombre}</span></div>
                 <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{p.fecha}</span></div>
                 <div><span className="text-gray-500">Lugar:</span> <span className="font-medium">{p.lugar || 'N/A'}</span></div>
-                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{p.duracion || 'N/A'} min</span></div>
-                <div><span className="text-gray-500">Dinero:</span> <span className="font-medium">${p.dinero_jugado || 0} {p.moneda}</span></div>
+                <div><span className="text-gray-500">Duración:</span> <span className="font-medium">{p.duracion || '0'}:{String(p.duracion_segundos||0).padStart(2,'0')}</span></div>
+                <div><span className="text-gray-500">Dinero:</span> <span className="font-medium">${p.dinero_jugado || 0}</span></div>
                 <div><span className="text-gray-500">Cómo fue:</span> <span className="font-medium">{p.como_fue || 'N/A'}</span></div>
                 <div><span className="text-gray-500">Oponente:</span> <span className="font-medium">{p.duenio_oponente || 'N/A'}</span></div>
                 <div><span className="text-gray-500">Peso Op.:</span> <span className="font-medium">{p.peso_oponente_libras || '?'}lb {p.peso_oponente_onzas || 0}oz</span></div>
@@ -1058,20 +1182,18 @@ const PeleasModule = () => {
               </Field>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <Field label="Resultado" required>
                 <Select value={form.resultado} onChange={e => setForm({...form, resultado: e.target.value})}
                   options={[{value:'Ganó',label:'✅ Ganó'},{value:'Perdió',label:'❌ Perdió'}]} />
               </Field>
-              <Field label="Duración (min)"><Input type="number" value={form.duracion} onChange={e => setForm({...form, duracion: e.target.value})} /></Field>
-              <Field label="Dinero">
-                <div className="flex gap-1">
-                  <Input type="number" placeholder="$" value={form.dinero_jugado} onChange={e => setForm({...form, dinero_jugado: e.target.value})} className="flex-1" />
-                  <select value={form.moneda} onChange={e => setForm({...form, moneda: e.target.value})} className="border rounded-lg px-2 text-sm">
-                    <option value="USD">USD</option><option value="RD$">RD$</option>
-                  </select>
-                </div>
+              <Field label="Dinero (USD)">
+                <Input type="number" placeholder="$" value={form.dinero_jugado} onChange={e => setForm({...form, dinero_jugado: e.target.value})} />
               </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Duración (min)"><Input type="number" placeholder="0" value={form.duracion} onChange={e => setForm({...form, duracion: e.target.value})} /></Field>
+              <Field label="Segundos"><Input type="number" placeholder="0" min="0" max="59" value={form.duracion_segundos} onChange={e => setForm({...form, duracion_segundos: e.target.value})} /></Field>
             </div>
 
             {/* Cómo fue */}
@@ -1150,12 +1272,15 @@ const DashboardModule = () => {
           {/* Info general */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-800">{selected.nombre || 'Sin nombre'}</h3>
-                <p className="text-sm text-gray-500">
-                  {selected.numero_pinches ? `#${selected.numero_pinches} • ` : ''}{selected.sexo} • {selected.linea_genetica || 'Sin línea'}
-                  {selected.color ? ` • ${selected.color}` : ''}
-                </p>
+              <div className="flex items-start gap-3">
+                {selected.foto && <img src={selected.foto} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />}
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">{selected.nombre || 'Sin nombre'}</h3>
+                  <p className="text-sm text-gray-500">
+                    {selected.numero_pinches ? `#${selected.numero_pinches} • ` : ''}{selected.sexo} • {selected.linea_genetica || 'Sin línea'}
+                    {selected.color ? ` • ${selected.color}` : ''}
+                  </p>
+                </div>
               </div>
               {selected.amarrado && <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded">AMARRADO</span>}
             </div>
@@ -1227,7 +1352,7 @@ const DashboardModule = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold">{p.resultado === 'Ganó' ? '✅' : '❌'}</span>
                         <span className="text-xs text-gray-500">{p.fecha}</span>
-                        <span className="text-xs">{p.duracion ? `${p.duracion}min` : ''}</span>
+                        <span className="text-xs">{p.duracion ? `${p.duracion}:${String(p.duracion_segundos||0).padStart(2,'0')}` : ''}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {p.como_fue && <span className="text-[10px] text-purple-600">{p.como_fue}</span>}
@@ -1261,6 +1386,7 @@ const DashboardModule = () => {
                   <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:border-red-300 active:bg-gray-50 transition"
                     onClick={() => loadData(g)}>
                     <div className="flex items-start justify-between">
+                      {g.foto && <img src={g.foto} className="w-14 h-14 rounded-lg object-cover mr-3 flex-shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-gray-800">{g.nombre || 'Sin nombre'}</span>
@@ -1437,8 +1563,8 @@ const DashboardModule = () => {
             <div className="grid grid-cols-2 gap-2">
               <div><span className="text-gray-500">Fecha:</span> {showDetPel.fecha}</div>
               <div><span className="text-gray-500">Lugar:</span> {showDetPel.lugar || 'N/A'}</div>
-              <div><span className="text-gray-500">Duración:</span> {showDetPel.duracion || '?'}min</div>
-              <div><span className="text-gray-500">Dinero:</span> ${showDetPel.dinero_jugado||0} {showDetPel.moneda}</div>
+              <div><span className="text-gray-500">Duración:</span> {showDetPel.duracion || '0'}:{String(showDetPel.duracion_segundos||0).padStart(2,'0')}</div>
+              <div><span className="text-gray-500">Dinero:</span> ${showDetPel.dinero_jugado||0}</div>
               <div><span className="text-gray-500">Cómo fue:</span> {showDetPel.como_fue || 'N/A'}</div>
               <div><span className="text-gray-500">Armador:</span> {showDetPel.armador || 'N/A'}</div>
             </div>
