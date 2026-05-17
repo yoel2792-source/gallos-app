@@ -424,7 +424,7 @@ const GeneticaModule = () => {
   const [padreSelected, setPadreSelected] = useState(null);
   const [madreSelected, setMadreSelected] = useState(null);
 
-  const caracteristicas = opciones.filter(o => o.tipo === 'caracteristicas').map(o => o.valor);
+  const caracteristicas = opciones['caracteristicas'] || [];
   const [nuevaCar, setNuevaCar] = useState('');
 
   const filteredGallos = useMemo(() => {
@@ -852,7 +852,7 @@ const EntrenamientosModule = () => {
   const [showDetalle, setShowDetalle] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const nutricionOpts = opciones.filter(o => o.tipo === 'nutricion').map(o => o.valor);
+  const nutricionOpts = opciones['nutricion'] || [];
   const [nuevaNut, setNuevaNut] = useState('');
 
   const emptyForm = {
@@ -1190,8 +1190,8 @@ const PeleasModule = () => {
   const [showDetalle, setShowDetalle] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const comoFueOpts = opciones.filter(o => o.tipo === 'como_fue').map(o => o.valor);
-  const estiloOpts = opciones.filter(o => o.tipo === 'estilos_oponente').map(o => o.valor);
+  const comoFueOpts = opciones['como_fue'] || [];
+  const estiloOpts = opciones['estilos_oponente'] || [];
 
   const emptyForm = {
     gallo_id: null, fecha: new Date().toISOString().split('T')[0], lugar: '',
