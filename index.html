@@ -32,13 +32,7 @@ const { useState, useEffect, useCallback, useMemo, useRef, createContext, useCon
 // ============================================
 const SUPABASE_URL = 'https://lpgzeiyparsqzhwopyvc.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZ3plaXlwYXJzcXpod29weXZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQzNzYsImV4cCI6MjA5MTA1MDM3Nn0.NIh_N6xxkwT-c_iROK0FMEfdgDYW89QwsMOv_k30S04';
-// Service role key — Supabase Dashboard → Project Settings → API → service_role
-// Permite crear usuarios sin emails. Solo usar en apps privadas.
-const SUPABASE_SERVICE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZ3plaXlwYXJzcXpod29weXZjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NDM3NiwiZXhwIjoyMDkxMDUwMzc2fQ.GbOLhqIylLimj8Ucfb72dWkQkx0uGh7Jwcj8kzCr3zY';
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-const supabaseAdmin = window.supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE, {
-  auth: { autoRefreshToken: false, persistSession: false }
-});
 
 // ============================================
 // CONTEXTO GLOBAL
@@ -1995,27 +1989,33 @@ const GestionEquipoModal = ({ onClose, user, collaborators, setCollaborators }) 
     if (!email.trim() || !password.trim()) { setErrorMsg('Email y contraseña son requeridos'); return; }
     if (password.length < 6) { setErrorMsg('La contraseña debe tener al menos 6 caracteres'); return; }
     setSaving(true); setErrorMsg(''); setSuccessMsg('');
-    const { data: newUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-      email: email.trim().toLowerCase(),
-      password: password.trim(),
-      email_confirm: true
-    });
-    if (authErr) {
-      setErrorMsg(authErr.message.includes('already') ? 'Ese email ya tiene cuenta' : authErr.message);
-      setSaving(false); return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password: password.trim(),
+          role,
+          owner_id: user.id
+        })
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setErrorMsg(result.error?.includes('already') ? 'Ese email ya tiene cuenta' : (result.error || 'Error al crear usuario'));
+        setSaving(false); return;
+      }
+      setSuccessMsg(`Cuenta creada. ${email.trim()} ya puede entrar.`);
+      setEmail(''); setPassword('');
+      const { data: updated } = await supabase.from('memberships').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
+      setCollaborators(updated || []);
+    } catch(e) {
+      setErrorMsg('Error de conexión: ' + e.message);
     }
-    const { error: memErr } = await supabase.from('memberships').insert({
-      owner_id: user.id,
-      collaborator_email: email.trim().toLowerCase(),
-      collaborator_id: newUser.user.id,
-      role,
-      status: 'active'
-    });
-    if (memErr) { setErrorMsg(memErr.message); setSaving(false); return; }
-    setSuccessMsg(`Cuenta creada. ${email.trim()} ya puede entrar.`);
-    setEmail(''); setPassword('');
-    const { data: updated } = await supabase.from('memberships').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
-    setCollaborators(updated || []);
     setSaving(false);
   };
 
