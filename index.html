@@ -32,7 +32,13 @@ const { useState, useEffect, useCallback, useMemo, useRef, createContext, useCon
 // ============================================
 const SUPABASE_URL = 'https://lpgzeiyparsqzhwopyvc.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZ3plaXlwYXJzcXpod29weXZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQzNzYsImV4cCI6MjA5MTA1MDM3Nn0.NIh_N6xxkwT-c_iROK0FMEfdgDYW89QwsMOv_k30S04';
+// Service role key — Supabase Dashboard → Project Settings → API → service_role
+// Permite crear usuarios sin emails. Solo usar en apps privadas.
+const SUPABASE_SERVICE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZ3plaXlwYXJzcXpod29weXZjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NDM3NiwiZXhwIjoyMDkxMDUwMzc2fQ.GbOLhqIylLimj8Ucfb72dWkQkx0uGh7Jwcj8kzCr3zY';
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const supabaseAdmin = window.supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE, {
+  auth: { autoRefreshToken: false, persistSession: false }
+});
 
 // ============================================
 // CONTEXTO GLOBAL
@@ -223,10 +229,169 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
 };
 
 // ============================================
+// CATÁLOGO DE CARACTERÍSTICAS POR CATEGORÍA
+// ============================================
+const LEYENDA = {
+  'Alto':                   'Gallo de estructura alta y estilizada.',
+  'Bajito':                 'Gallo compacto y de centro de gravedad bajo.',
+  'Largo':                  'Gallo con cuerpo largo y extendido.',
+  'Compacto':               'Gallo corto y sólido físicamente.',
+  'Ancho':                  'Gallo de pecho o estructura corporal amplia.',
+  'Delgado':                'Gallo fino y ligero de estructura.',
+  'Patas largas':           'Le ayudan en distancia, vuelo o alcance.',
+  'Patas normales':         'Balance promedio entre alcance y estabilidad.',
+  'Patas cortas':           'Más pegado al piso y con centro de gravedad bajo.',
+  'Buen pulmón':            'Mantiene intensidad y condición durante peleas largas.',
+  'Resistente':             'Tolera castigo físico sin bajar rápidamente el rendimiento.',
+  'Se cansa rápido':        'Pierde intensidad o condición rápidamente.',
+  'Se recupera rápido':     'Vuelve rápido al ritmo después de cansancio o castigo.',
+  'Balanceado':             'Tiene buena distribución física y estabilidad.',
+  'Pesado':                 'Gallo con peso fuerte o sensación corporal pesada.',
+  'Flaco':                  'Gallo liviano o de poca masa corporal.',
+  'Equilibrado':            'Mantiene buen control corporal durante la pelea.',
+  'Poderoso':               'Gallo fuerte que genera daño o presión física.',
+  'Cortador':               'Conecta espuelas o cortes efectivos constantemente.',
+  'Picador':                'Usa mucho el pico durante la pelea.',
+  'Pica montado':           'Pica mientras está encima o dominando al rival.',
+  'Pica de buche':          'Busca atacar directamente el área del buche.',
+  'Revolcao':               'Pelea bien pegado y enredado al rival, sin mucha distancia.',
+  'Empuja':                 'Presiona físicamente y busca mover o dominar al rival.',
+  'Maraquero':              'Pelea bien metido abajo, escondido entre patas o alas, tirando constantemente.',
+  'Pelea corto':            'Trabaja mejor en distancia corta y pegada.',
+  'Pelea largo':            'Trabaja mejor en distancia y tiempo.',
+  'Lento':                  'No tiene mucha velocidad de movimiento o ataque.',
+  'Rápido':                 'Se mueve o tira con velocidad alta.',
+  'Preciso':                'Conecta ataques efectivos con buena colocación.',
+  'Explosivo':              'Comienza fuerte y con mucha intensidad.',
+  'Constante':              'Mantiene ritmo estable durante toda la pelea.',
+  'Lento pero certero':     'No es rápido, pero conecta ataques efectivos.',
+  'Activa al corte':        'Se crece o pelea más duro cuando recibe castigo o corte.',
+  'Baja intensidad al corte': 'Pierde intensidad o enfoque después de recibir corte.',
+  'Agresivo':               'Busca atacar constantemente y dominar.',
+  'Calmado':                'Mantiene tranquilidad y control.',
+  'Nervioso':               'Se altera o acelera fácilmente.',
+  'Picón':                  'Gallo muy agresivo con las personas; tira o pica al manejarlo.',
+  'Produce velocidad':      'La mayoría de sus hijos salen rápidos.',
+  'Produce inteligencia':   'Sus hijos suelen leer bien y pelear con lógica.',
+  'Produce resistencia':    'Sus hijos suelen tener buen pulmón y aguante.',
+  'Produce fuerza':         'Sus hijos destacan por potencia y presión.',
+  'Mejorador de línea':     'Tiende a mejorar la calidad genética general.',
+  'Hijos consistentes':     'La mayoría de sus hijos salen parecidos y funcionales.',
+  'Hijos variados':         'Produce hijos muy distintos entre sí.',
+  'Buena calidad materna':  'Gallina que produce hijos fuertes y funcionales.',
+};
+
+const CATS_CARACTERISTICAS = [
+  {
+    id: 'fisico', label: '💪 Físico', color: 'blue',
+    subs: [
+      { label: 'Cuerpo', opts: ['Alto', 'Bajito', 'Largo', 'Compacto', 'Ancho', 'Delgado'] },
+      { label: 'Patas',  opts: ['Patas largas', 'Patas normales', 'Patas cortas'] }
+    ]
+  },
+  {
+    id: 'capacidad', label: '🫁 Capacidad Física', color: 'green',
+    subs: [
+      { label: 'Resistencia',   opts: ['Buen pulmón', 'Resistente', 'Se cansa rápido', 'Se recupera rápido'] },
+      { label: 'Peso / Balance', opts: ['Balanceado', 'Pesado', 'Flaco', 'Equilibrado'] }
+    ]
+  },
+  {
+    id: 'estilo', label: '⚔️ Estilo de Pelea', color: 'red',
+    subs: [
+      { label: 'Tipo',             opts: ['Poderoso', 'Cortador', 'Picador', 'Pica montado', 'Pica de buche', 'Revolcao', 'Empuja', 'Maraquero'] },
+      { label: 'Distancia',        opts: ['Pelea corto', 'Pelea largo'] },
+      { label: 'Ritmo',            opts: ['Lento', 'Rápido', 'Preciso', 'Explosivo', 'Constante', 'Lento pero certero'] },
+      { label: 'Al recibir corte', opts: ['Activa al corte', 'Baja intensidad al corte'] },
+      { label: 'Temperamento',     opts: ['Agresivo', 'Calmado', 'Nervioso', 'Picón'] }
+    ]
+  },
+  {
+    id: 'genetica', label: '🧬 Genética / Reproducción', color: 'purple',
+    subs: [
+      { label: 'Lo que produce',   opts: ['Produce velocidad', 'Produce inteligencia', 'Produce resistencia', 'Produce fuerza'] },
+      { label: 'Calidad genética', opts: ['Mejorador de línea', 'Hijos consistentes', 'Hijos variados', 'Buena calidad materna'] }
+    ]
+  }
+];
+
+const CAT_COLORS = {
+  blue:   { hdr: 'bg-blue-600 text-white',   on: 'bg-blue-600 text-white',   off: 'bg-gray-100 text-gray-700 hover:bg-blue-50',   lbl: 'text-blue-700',   ring: 'border-blue-400' },
+  green:  { hdr: 'bg-green-600 text-white',  on: 'bg-green-600 text-white',  off: 'bg-gray-100 text-gray-700 hover:bg-green-50',  lbl: 'text-green-700',  ring: 'border-green-400' },
+  red:    { hdr: 'bg-red-600 text-white',    on: 'bg-red-600 text-white',    off: 'bg-gray-100 text-gray-700 hover:bg-red-50',    lbl: 'text-red-700',    ring: 'border-red-400' },
+  purple: { hdr: 'bg-purple-600 text-white', on: 'bg-purple-600 text-white', off: 'bg-gray-100 text-gray-700 hover:bg-purple-50', lbl: 'text-purple-700', ring: 'border-purple-400' }
+};
+
+// Modal de leyenda para una categoría
+const LeyendaModal = ({ cat, onClose }) => {
+  const c = CAT_COLORS[cat.color];
+  const todasOpts = cat.subs.flatMap(s => s.opts);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{background:'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-t-2xl max-h-[80vh] overflow-y-auto shadow-2xl fade-in" onClick={e => e.stopPropagation()}>
+        <div className={`sticky top-0 px-4 py-3 flex justify-between items-center rounded-t-2xl ${c.hdr}`}>
+          <span className="font-bold text-sm">Leyenda — {cat.label}</span>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/40 text-white text-sm">✕</button>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {todasOpts.map(op => (
+            <div key={op} className="px-4 py-3 flex gap-3">
+              <span className="font-semibold text-gray-800 text-sm min-w-[120px]">{op}</span>
+              <span className="text-gray-500 text-sm leading-snug">{LEYENDA[op] || '—'}</span>
+            </div>
+          ))}
+        </div>
+        <div className="h-6" />
+      </div>
+    </div>
+  );
+};
+
+const CaracteristicasCat = ({ seleccionadas, onToggle }) => {
+  const [leyendaAbierta, setLeyendaAbierta] = useState(null);
+  return (
+    <div className="space-y-3">
+      {CATS_CARACTERISTICAS.map(cat => {
+        const c = CAT_COLORS[cat.color];
+        return (
+          <div key={cat.id} className="border border-gray-200 rounded-xl overflow-hidden">
+            <div className={`px-3 py-1.5 flex justify-between items-center ${c.hdr}`}>
+              <span className="text-xs font-bold">{cat.label}</span>
+              <button
+                type="button"
+                onClick={() => setLeyendaAbierta(cat)}
+                className="w-5 h-5 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center text-white text-[11px] font-bold leading-none"
+                title="Ver definiciones"
+              >ℹ</button>
+            </div>
+            <div className="p-3 space-y-3">
+              {cat.subs.map(sub => (
+                <div key={sub.label}>
+                  <p className={`text-[10px] uppercase tracking-wide mb-1.5 font-semibold ${c.lbl}`}>{sub.label}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sub.opts.map(op => (
+                      <button key={op} type="button" onClick={() => onToggle(op)}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${seleccionadas.includes(op) ? c.on : c.off}`}>
+                        {op}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {leyendaAbierta && <LeyendaModal cat={leyendaAbierta} onClose={() => setLeyendaAbierta(null)} />}
+    </div>
+  );
+};
+
+// ============================================
 // MÓDULO: GENÉTICA
 // ============================================
 const GeneticaModule = () => {
-  const { gallos, loadGallos, opciones, addOpcion, toast } = useContext(AppContext);
+  const { gallos, loadGallos, opciones, addOpcion, toast, activeOwnerId, canEdit } = useContext(AppContext);
   const [showForm, setShowForm] = useState(false);
   const [editingGallo, setEditingGallo] = useState(null);
   const [showArbol, setShowArbol] = useState(null);
@@ -275,7 +440,8 @@ const GeneticaModule = () => {
       madre_id: form.madre_id,
       caracteristicas: form.caracteristicas,
       observaciones: form.observaciones || null,
-      foto: form.foto || null
+      foto: form.foto || null,
+      user_id: activeOwnerId
     };
 
     let error;
@@ -618,22 +784,23 @@ const GeneticaModule = () => {
               </div>
             </div>
 
-            {/* Características */}
+            {/* Características por categoría */}
             <div className="border-t pt-3">
-              <p className="text-sm font-medium text-gray-700 mb-2">Características</p>
-              <div className="flex flex-wrap gap-1.5">
-                {caracteristicas.map(c => (
-                  <button key={c} onClick={() => toggleCar(c)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-                      form.caracteristicas.includes(c) ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
-                    }`}>{c}</button>
-                ))}
+              <div className="flex justify-between items-center mb-2">
+                <p className="text-sm font-medium text-gray-700">Características</p>
+                {form.caracteristicas.length > 0 && (
+                  <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-semibold">
+                    {form.caracteristicas.length} seleccionada{form.caracteristicas.length > 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
-              <div className="flex gap-2 mt-2">
-                <Input type="text" placeholder="Nueva característica..." value={nuevaCar}
-                  onChange={e => setNuevaCar(e.target.value)} className="flex-1 !py-1.5 text-sm" />
-                <button onClick={handleAddCar} className="bg-gray-200 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-300">+</button>
-              </div>
+              <CaracteristicasCat seleccionadas={form.caracteristicas} onToggle={toggleCar} />
+              {form.caracteristicas.length > 0 && (
+                <button onClick={() => setForm(f => ({ ...f, caracteristicas: [] }))}
+                  className="mt-2 text-xs text-gray-400 hover:text-red-500 underline">
+                  Limpiar selección
+                </button>
+              )}
             </div>
 
             {/* Foto del gallo */}
@@ -661,7 +828,7 @@ const GeneticaModule = () => {
 // MÓDULO: ENTRENAMIENTOS
 // ============================================
 const EntrenamientosModule = () => {
-  const { gallos, opciones, addOpcion, toast } = useContext(AppContext);
+  const { gallos, opciones, addOpcion, toast, activeOwnerId, canEdit } = useContext(AppContext);
   const [entrenamientos, setEntrenamientos] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -738,12 +905,13 @@ const EntrenamientosModule = () => {
       temperatura: form.temperatura ? parseFloat(form.temperatura) : null,
     };
 
+    const dataConUser = { ...data, user_id: activeOwnerId };
     let error;
     if (editingId) {
-      const { created_at, updated_at, gallos: _, ...cleanData } = data;
+      const { created_at, updated_at, gallos: _g, user_id: _u, ...cleanData } = dataConUser;
       ({ error } = await supabase.from('entrenamientos').update(cleanData).eq('id', editingId));
     } else {
-      ({ error } = await supabase.from('entrenamientos').insert(data));
+      ({ error } = await supabase.from('entrenamientos').insert(dataConUser));
     }
 
     if (error) { toast(error.message, 'error'); return; }
@@ -999,7 +1167,7 @@ const EntrenamientosModule = () => {
 // MÓDULO: PELEAS
 // ============================================
 const PeleasModule = () => {
-  const { gallos, opciones, addOpcion, toast } = useContext(AppContext);
+  const { gallos, opciones, addOpcion, toast, activeOwnerId, canEdit } = useContext(AppContext);
   const [peleas, setPeleas] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -1043,12 +1211,13 @@ const PeleasModule = () => {
       moneda: 'USD',
     };
 
+    const dataConUser = { ...data, user_id: activeOwnerId };
     let error;
     if (editingId) {
-      const { created_at, updated_at, gallos: _, ...cleanData } = data;
+      const { created_at, updated_at, gallos: _g, user_id: _u, ...cleanData } = dataConUser;
       ({ error } = await supabase.from('peleas').update(cleanData).eq('id', editingId));
     } else {
-      ({ error } = await supabase.from('peleas').insert(data));
+      ({ error } = await supabase.from('peleas').insert(dataConUser));
     }
 
     if (error) { toast(error.message, 'error'); return; }
@@ -1254,6 +1423,9 @@ const DashboardModule = () => {
   const [entrenamientos, setEntrenamientos] = useState([]);
   const [peleas, setPeleas] = useState([]);
   const [showArbol, setShowArbol] = useState(false);
+  const [showFicha, setShowFicha] = useState(false);
+  const [showAllEnts, setShowAllEnts] = useState(false);
+  const [showAllPels, setShowAllPels] = useState(false);
   const [showDetEnt, setShowDetEnt] = useState(null);
   const [showDetPel, setShowDetPel] = useState(null);
   const [viewingPhoto, setViewingPhoto] = useState(null);
@@ -1335,18 +1507,30 @@ const DashboardModule = () => {
               </div>
             )}
 
-            <button onClick={() => setShowArbol(true)} className="mt-3 w-full bg-gray-100 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-200">
-              🌳 Ver Árbol Genealógico
-            </button>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button onClick={() => setShowFicha(true)} className="bg-orange-50 text-orange-700 border border-orange-200 py-2 rounded-lg text-sm font-semibold hover:bg-orange-100">
+                🧬 Ficha Completa
+              </button>
+              <button onClick={() => setShowArbol(true)} className="bg-gray-100 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-200">
+                🌳 Árbol Genealógico
+              </button>
+            </div>
           </div>
 
           {/* Entrenamientos recientes */}
           {selected.amarrado && (
             <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h4 className="font-bold text-gray-800 mb-3">Últimos Entrenamientos</h4>
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="font-bold text-gray-800">Entrenamientos</h4>
+                {entrenamientos.length > 5 && (
+                  <button onClick={() => setShowAllEnts(true)} className="text-xs text-blue-600 font-semibold hover:underline">
+                    Ver todos ({entrenamientos.length}) →
+                  </button>
+                )}
+              </div>
               {entrenamientos.length === 0 ? <p className="text-sm text-gray-400">Sin entrenamientos</p> : (
                 <div className="space-y-1.5">
-                  {entrenamientos.slice(0, 10).map(e => (
+                  {entrenamientos.slice(0, 5).map(e => (
                     <div key={e.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50 -mx-1 px-1 rounded"
                       onClick={() => setShowDetEnt(e)}>
                       <div className="flex items-center gap-2">
@@ -1365,10 +1549,17 @@ const DashboardModule = () => {
           {/* Peleas recientes */}
           {selected.amarrado && (
             <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h4 className="font-bold text-gray-800 mb-3">Historial de Peleas</h4>
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="font-bold text-gray-800">Historial de Peleas</h4>
+                {peleas.length > 5 && (
+                  <button onClick={() => setShowAllPels(true)} className="text-xs text-purple-600 font-semibold hover:underline">
+                    Ver todas ({peleas.length}) →
+                  </button>
+                )}
+              </div>
               {peleas.length === 0 ? <p className="text-sm text-gray-400">Sin peleas</p> : (
                 <div className="space-y-1.5">
-                  {peleas.slice(0, 10).map(p => (
+                  {peleas.slice(0, 5).map(p => (
                     <div key={p.id} className={`flex items-center justify-between py-1.5 px-2 rounded cursor-pointer ${p.resultado === 'Ganó' ? 'bg-green-50 hover:bg-green-100' : 'bg-red-50 hover:bg-red-100'}`}
                       onClick={() => setShowDetPel(p)}>
                       <div className="flex items-center gap-2">
@@ -1493,6 +1684,193 @@ const DashboardModule = () => {
         </Modal>
       )}
 
+      {/* ── MODAL: FICHA COMPLETA ─────────────────────────────────── */}
+      {showFicha && selected && (
+        <Modal title={`Ficha: ${selected.nombre || '#' + selected.numero_pinches}`} onClose={() => setShowFicha(false)}>
+          <div className="space-y-4 text-sm">
+
+            {/* Foto + datos básicos */}
+            <div className="flex gap-3 items-start">
+              {selected.foto && <img src={selected.foto} className="w-20 h-20 rounded-xl object-cover flex-shrink-0 cursor-pointer border border-gray-200" onClick={() => setViewingPhoto(selected.foto)} />}
+              <div className="flex-1 space-y-1">
+                <p><span className="text-gray-500">Nombre:</span> <span className="font-semibold">{selected.nombre || '—'}</span></p>
+                {selected.numero_pinches && <p><span className="text-gray-500">Pinches:</span> <span className="font-semibold">#{selected.numero_pinches}</span></p>}
+                <p><span className="text-gray-500">Sexo:</span> <span className="font-semibold">{selected.sexo}</span></p>
+                {selected.fecha_nacimiento && <p><span className="text-gray-500">Nacimiento:</span> <span className="font-semibold">{selected.fecha_nacimiento}</span></p>}
+                {selected.color && <p><span className="text-gray-500">Color:</span> <span className="font-semibold">{selected.color}</span></p>}
+                {selected.linea_genetica && <p><span className="text-gray-500">Línea:</span> <span className="font-semibold">{selected.linea_genetica}</span></p>}
+                <p><span className="text-gray-500">Amarrado:</span> <span className={`font-semibold ${selected.amarrado ? 'text-red-700' : 'text-gray-700'}`}>{selected.amarrado ? `Sí${selected.jaula ? ` – Jaula ${selected.jaula}` : ''}` : 'No'}</span></p>
+              </div>
+            </div>
+
+            {/* Genealogía */}
+            <div className="border-t pt-3">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">👨‍👩‍👧 Genealogía</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-blue-50 rounded-lg p-2">
+                  <p className="text-[10px] text-blue-500 font-bold uppercase">Padre</p>
+                  <p className="font-semibold text-gray-800">{padre ? (padre.nombre || `#${padre.numero_pinches}`) : 'Desconocido'}</p>
+                  {padre?.linea_genetica && <p className="text-xs text-gray-500">{padre.linea_genetica}</p>}
+                </div>
+                <div className="bg-pink-50 rounded-lg p-2">
+                  <p className="text-[10px] text-pink-500 font-bold uppercase">Madre</p>
+                  <p className="font-semibold text-gray-800">{madre ? (madre.nombre || `#${madre.numero_pinches}`) : 'Desconocida'}</p>
+                  {madre?.linea_genetica && <p className="text-xs text-gray-500">{madre.linea_genetica}</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Características por categoría */}
+            {selected.caracteristicas && selected.caracteristicas.length > 0 && (
+              <div className="border-t pt-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">⭐ Características</p>
+                <div className="space-y-3">
+                  {CATS_CARACTERISTICAS.map(cat => {
+                    const c = CAT_COLORS[cat.color];
+                    const todasOpts = cat.subs.flatMap(s => s.opts);
+                    const presentes = selected.caracteristicas.filter(x => todasOpts.includes(x));
+                    if (presentes.length === 0) return null;
+                    return (
+                      <div key={cat.id}>
+                        <p className={`text-[10px] font-bold uppercase tracking-wide mb-1.5 ${c.lbl}`}>{cat.label}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {presentes.map(x => (
+                            <div key={x} className="group relative">
+                              <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${c.on}`}>{x}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Definiciones de las presentes */}
+                        <div className="mt-2 space-y-1">
+                          {presentes.map(x => LEYENDA[x] && (
+                            <p key={x} className="text-xs text-gray-500"><span className="font-semibold text-gray-700">{x}:</span> {LEYENDA[x]}</p>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Características no categorizadas */}
+                  {(() => {
+                    const todasCat = CATS_CARACTERISTICAS.flatMap(cat => cat.subs.flatMap(s => s.opts));
+                    const otras = selected.caracteristicas.filter(x => !todasCat.includes(x));
+                    if (otras.length === 0) return null;
+                    return (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5 text-gray-500">Otras</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {otras.map(x => <span key={x} className="text-xs px-2.5 py-1 rounded-full bg-orange-100 text-orange-800 font-medium">{x}</span>)}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Observaciones */}
+            {selected.observaciones && (
+              <div className="border-t pt-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">📝 Observaciones</p>
+                <p className="text-gray-700 leading-relaxed">{selected.observaciones}</p>
+              </div>
+            )}
+
+            {/* Stats si está amarrado */}
+            {selected.amarrado && (
+              <div className="border-t pt-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📊 Resumen</p>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-blue-50 rounded-lg p-2">
+                    <p className="text-lg font-bold text-blue-700">{entrenamientos.length}</p>
+                    <p className="text-[10px] text-blue-600">Entrenamientos</p>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-2">
+                    <p className="text-lg font-bold text-green-700">{ganadas}</p>
+                    <p className="text-[10px] text-green-600">Ganadas</p>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-2">
+                    <p className="text-lg font-bold text-red-700">{perdidas}</p>
+                    <p className="text-[10px] text-red-600">Perdidas</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── MODAL: TODOS LOS ENTRENAMIENTOS ──────────────────────── */}
+      {showAllEnts && selected && (
+        <Modal title={`Entrenamientos — ${selected.nombre || '#' + selected.numero_pinches}`} onClose={() => setShowAllEnts(false)}>
+          <div className="space-y-1.5">
+            {entrenamientos.length === 0 ? <p className="text-sm text-gray-400 text-center py-6">Sin entrenamientos</p> : entrenamientos.map(e => (
+              <div key={e.id} className="border border-gray-100 rounded-lg p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100"
+                onClick={() => { setShowDetEnt(e); setShowAllEnts(false); }}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">{e.fecha}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      ⚖️ {e.peso_libras}lb {e.peso_onzas}oz
+                      {e.corrida ? ` · ${e.corrida}' corrida` : ''}
+                      {e.chata ? ` · ${e.chata}' chata` : ''}
+                      {e.clima ? ` · ${e.clima}` : ''}
+                    </p>
+                    {e.nutricion_items && e.nutricion_items.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {e.nutricion_items.map(n => <span key={n} className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded">{n}</span>)}
+                      </div>
+                    )}
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded font-medium ml-2 ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── MODAL: TODAS LAS PELEAS ───────────────────────────────── */}
+      {showAllPels && selected && (
+        <Modal title={`Peleas — ${selected.nombre || '#' + selected.numero_pinches}`} onClose={() => setShowAllPels(false)}>
+          <div className="mb-3 grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="bg-gray-50 rounded-lg py-2">
+              <p className="text-lg font-bold text-gray-800">{peleas.length}</p>
+              <p className="text-gray-500">Total</p>
+            </div>
+            <div className="bg-green-50 rounded-lg py-2">
+              <p className="text-lg font-bold text-green-700">{ganadas}</p>
+              <p className="text-green-600">Ganadas</p>
+            </div>
+            <div className="bg-red-50 rounded-lg py-2">
+              <p className="text-lg font-bold text-red-700">{perdidas}</p>
+              <p className="text-red-600">Perdidas</p>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            {peleas.length === 0 ? <p className="text-sm text-gray-400 text-center py-6">Sin peleas</p> : peleas.map(p => (
+              <div key={p.id} className={`rounded-lg p-3 cursor-pointer ${p.resultado === 'Ganó' ? 'bg-green-50 hover:bg-green-100' : 'bg-red-50 hover:bg-red-100'}`}
+                onClick={() => { setShowDetPel(p); setShowAllPels(false); }}>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm">{p.resultado === 'Ganó' ? '✅' : '❌'}</span>
+                      <span className="text-sm font-semibold text-gray-800">{p.fecha}</span>
+                      {p.lugar && <span className="text-xs text-gray-500">{p.lugar}</span>}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {p.duracion ? `${p.duracion}:${String(p.duracion_segundos||0).padStart(2,'0')}` : ''}
+                      {p.como_fue ? ` · ${p.como_fue}` : ''}
+                      {p.duenio_oponente ? ` · vs ${p.duenio_oponente}` : ''}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold text-gray-700 ml-2">${p.dinero_jugado || 0}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
       {/* Detalle entrenamiento */}
       {showDetEnt && (
         <Modal title="Detalle Entrenamiento" onClose={() => setShowDetEnt(null)}>
@@ -1601,131 +1979,311 @@ const DashboardModule = () => {
   );
 };
 
+
 // ============================================
-// APP PRINCIPAL
+// GESTIÓN DE EQUIPO
 // ============================================
-const App = () => {
-  const [tab, setTab] = useState('dashboard');
-  const [gallos, setGallos] = useState([]);
-  const [opciones, setOpciones] = useState([]);
-  const [toastMsg, setToastMsg] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [dbError, setDbError] = useState(null);
+const GestionEquipoModal = ({ onClose, user, collaborators, setCollaborators }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('viewer');
+  const [saving, setSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const toast = (msg, type = 'info') => setToastMsg({ msg, type });
-
-  const loadGallos = async () => {
-    const { data, error } = await supabase.from('gallos').select('*').order('nombre');
-    if (error) { setDbError(error.message); return; }
-    setGallos(data || []);
+  const handleAdd = async () => {
+    if (!email.trim() || !password.trim()) { setErrorMsg('Email y contraseña son requeridos'); return; }
+    if (password.length < 6) { setErrorMsg('La contraseña debe tener al menos 6 caracteres'); return; }
+    setSaving(true); setErrorMsg(''); setSuccessMsg('');
+    const { data: newUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+      email: email.trim().toLowerCase(),
+      password: password.trim(),
+      email_confirm: true
+    });
+    if (authErr) {
+      setErrorMsg(authErr.message.includes('already') ? 'Ese email ya tiene cuenta' : authErr.message);
+      setSaving(false); return;
+    }
+    const { error: memErr } = await supabase.from('memberships').insert({
+      owner_id: user.id,
+      collaborator_email: email.trim().toLowerCase(),
+      collaborator_id: newUser.user.id,
+      role,
+      status: 'active'
+    });
+    if (memErr) { setErrorMsg(memErr.message); setSaving(false); return; }
+    setSuccessMsg(`Cuenta creada. ${email.trim()} ya puede entrar.`);
+    setEmail(''); setPassword('');
+    const { data: updated } = await supabase.from('memberships').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
+    setCollaborators(updated || []);
+    setSaving(false);
   };
 
-  const loadOpciones = async () => {
-    const { data } = await supabase.from('opciones_dinamicas').select('*').order('valor');
-    setOpciones(data || []);
+  const handleRemove = async (id) => {
+    if (!confirm('¿Quitar acceso a este usuario?')) return;
+    await supabase.from('memberships').delete().eq('id', id);
+    setCollaborators(prev => prev.filter(m => m.id !== id));
   };
 
-  const addOpcion = async (tipo, valor) => {
-    const { error } = await supabase.from('opciones_dinamicas').insert({ tipo, valor });
-    if (!error) await loadOpciones();
+  const handleRole = async (id, newRole) => {
+    await supabase.from('memberships').update({ role: newRole }).eq('id', id);
+    setCollaborators(prev => prev.map(m => m.id === id ? { ...m, role: newRole } : m));
   };
-
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      await Promise.all([loadGallos(), loadOpciones()]);
-      setLoading(false);
-    };
-    init();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <div className="animate-spin w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-500">Conectando a base de datos...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (dbError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-        <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full text-center">
-          <p className="text-4xl mb-4">⚠️</p>
-          <h2 className="text-lg font-bold text-gray-800 mb-2">Error de conexión</h2>
-          <p className="text-sm text-gray-500 mb-4">{dbError}</p>
-          <p className="text-xs text-gray-400 mb-4">Asegúrate de haber ejecutado el SQL de setup en tu Supabase Dashboard (SQL Editor).</p>
-          <button onClick={() => window.location.reload()} className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium">Reintentar</button>
-        </div>
-      </div>
-    );
-  }
-
-  const tabs = [
-    { id: 'dashboard', label: 'Inicio', icon: '📊' },
-    { id: 'genetica', label: 'Genética', icon: '🧬' },
-    { id: 'entrenamientos', label: 'Entreno', icon: '🏋️' },
-    { id: 'peleas', label: 'Peleas', icon: '⚔️' },
-  ];
 
   return (
-    <AppContext.Provider value={{ gallos, loadGallos, opciones, loadOpciones, addOpcion, toast }}>
-      <div className="min-h-screen bg-gray-100 pb-20 md:pb-4">
-        {/* Header */}
-        <header className="bg-gradient-to-r from-red-700 to-red-600 text-white px-4 py-3 shadow-lg sticky top-0 z-30">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-bold">GallosPR</h1>
-              <p className="text-[10px] text-red-200">Sistema de Gestión</p>
-            </div>
-            {/* Desktop tabs */}
-            <div className="hidden md:flex gap-1">
-              {tabs.map(t => (
-                <button key={t.id} onClick={() => setTab(t.id)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    tab === t.id ? 'bg-white/20 text-white' : 'text-red-200 hover:text-white hover:bg-white/10'
-                  }`}>
-                  {t.icon} {t.label}
-                </button>
+    <Modal title="👥 Mi Equipo" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-bold text-gray-800">Crear acceso para alguien</p>
+          <Input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+          <Input type="password" placeholder="Contraseña (mín. 6)" value={password} onChange={e => setPassword(e.target.value)} />
+          <select value={role} onChange={e => setRole(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 outline-none focus:ring-2 focus:ring-red-500">
+            <option value="viewer">Viewer — Solo puede ver</option>
+            <option value="editor">Editor — Puede ver y editar</option>
+          </select>
+          {errorMsg && <p className="text-xs text-red-600 bg-red-50 p-2 rounded">{errorMsg}</p>}
+          {successMsg && <p className="text-xs text-green-600 bg-green-50 p-2 rounded">{successMsg}</p>}
+          <button onClick={handleAdd} disabled={saving}
+            className="w-full bg-red-700 text-white py-2.5 rounded-lg font-semibold hover:bg-red-800 disabled:opacity-50">
+            {saving ? 'Creando...' : '+ Añadir al equipo'}
+          </button>
+        </div>
+
+        {collaborators.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Colaboradores actuales</p>
+            <div className="space-y-2">
+              {collaborators.map(m => (
+                <div key={m.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{m.collaborator_email}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <select value={m.role} onChange={e => handleRole(m.id, e.target.value)}
+                        className="text-xs border-0 bg-transparent text-gray-500 outline-none p-0">
+                        <option value="viewer">👁 Viewer</option>
+                        <option value="editor">✏️ Editor</option>
+                      </select>
+                      <span className="text-xs text-gray-400">• {m.status === 'active' ? 'Activo' : 'Pendiente'}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => handleRemove(m.id)} className="text-red-400 hover:text-red-600 text-xl ml-2">✕</button>
+                </div>
               ))}
             </div>
           </div>
-        </header>
+        )}
+      </div>
+    </Modal>
+  );
+};
 
-        {/* Content */}
-        <main className="max-w-4xl mx-auto p-4">
-          {tab === 'dashboard' && <DashboardModule />}
-          {tab === 'genetica' && <GeneticaModule />}
+// ============================================
+// APP PRINCIPAL
+// ============================================
+const App = ({ user }) => {
+  const [tab, setTab] = useState('gallos');
+  const [gallos, setGallos] = useState([]);
+  const [opciones, setOpciones] = useState({});
+  const [toastMsg, setToastMsg] = useState(null);
+  const [isCollaborator, setIsCollaborator] = useState(false);
+  const [myRole, setMyRole] = useState('viewer');
+  const [activeOwnerId, setActiveOwnerId] = useState(user.id);
+  const [collaborators, setCollaborators] = useState([]);
+  const [showEquipo, setShowEquipo] = useState(false);
+  const canEdit = !isCollaborator || myRole === 'editor';
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      const { data: active } = await supabase.from('memberships')
+        .select('*').eq('collaborator_id', user.id).eq('status', 'active').maybeSingle();
+      if (active) { setIsCollaborator(true); setMyRole(active.role); setActiveOwnerId(active.owner_id); return; }
+      const { data: pending } = await supabase.from('memberships')
+        .select('*').eq('collaborator_email', user.email).eq('status', 'pending').maybeSingle();
+      if (pending) {
+        await supabase.from('memberships').update({ collaborator_id: user.id, status: 'active' }).eq('id', pending.id);
+        setIsCollaborator(true); setMyRole(pending.role); setActiveOwnerId(pending.owner_id); return;
+      }
+      const { data: collabs } = await supabase.from('memberships')
+        .select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
+      setCollaborators(collabs || []);
+    };
+    checkAccess();
+  }, []);
+
+  const toast = useCallback((msg, type = 'success') => {
+    setToastMsg({ msg, type });
+    setTimeout(() => setToastMsg(null), 3000);
+  }, []);
+
+  const loadGallos = useCallback(async () => {
+    const { data } = await supabase.from('gallos').select('*').eq('user_id', activeOwnerId).order('nombre');
+    setGallos(data || []);
+  }, [activeOwnerId]);
+
+  const addOpcion = useCallback(async (categoria, valor) => {
+    const clean = valor.trim();
+    if (!clean) return;
+    setOpciones(prev => ({ ...prev, [categoria]: [...(prev[categoria] || []), clean] }));
+    await supabase.from('opciones_dinamicas').insert({ user_id: activeOwnerId, categoria, valor: clean });
+  }, [activeOwnerId]);
+
+  useEffect(() => { loadGallos(); }, [loadGallos]);
+
+  useEffect(() => {
+    const loadOpciones = async () => {
+      const { data } = await supabase.from('opciones_dinamicas').select('*').eq('user_id', activeOwnerId);
+      const map = {};
+      (data || []).forEach(({ categoria, valor }) => {
+        if (!map[categoria]) map[categoria] = [];
+        map[categoria].push(valor);
+      });
+      setOpciones(map);
+    };
+    loadOpciones();
+  }, [activeOwnerId]);
+
+  const TABS = [
+    { id: 'gallos', label: '🐓 Gallos' },
+    { id: 'entrenamientos', label: '🏋️ Entrena' },
+    { id: 'peleas', label: '⚔️ Peleas' },
+    { id: 'dashboard', label: '📊 Dashboard' },
+  ];
+
+  return (
+    <AppContext.Provider value={{ gallos, loadGallos, opciones, addOpcion, toast, activeOwnerId, canEdit }}>
+      <div className="min-h-screen bg-gray-100 pb-20">
+        <div className="bg-red-700 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-md">
+          <div>
+            <h1 className="text-lg font-bold leading-tight">🐓 GallosPR</h1>
+            {isCollaborator && <p className="text-xs text-red-200">Viendo gallos ajenos ({myRole})</p>}
+          </div>
+          <div className="flex items-center gap-2">
+            {!isCollaborator && (
+              <button onClick={() => setShowEquipo(true)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-semibold">
+                👥 Equipo
+              </button>
+            )}
+            <button onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+              className="bg-red-800 hover:bg-red-900 px-3 py-1.5 rounded-lg text-xs font-semibold">
+              Salir
+            </button>
+          </div>
+        </div>
+
+        <div className="px-4 py-4 max-w-2xl mx-auto">
+          {tab === 'gallos' && <GeneticaModule />}
           {tab === 'entrenamientos' && <EntrenamientosModule />}
           {tab === 'peleas' && <PeleasModule />}
-        </main>
+          {tab === 'dashboard' && <DashboardModule />}
+        </div>
 
-        {/* Mobile bottom nav */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 safe-area-bottom">
-          <div className="flex">
-            {tabs.map(t => (
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 shadow-lg">
+          <div className="flex max-w-2xl mx-auto">
+            {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 transition ${
-                  tab === t.id ? 'text-red-600' : 'text-gray-400'
-                }`}>
-                <span className="text-lg">{t.icon}</span>
-                <span className="text-[10px] font-medium">{t.label}</span>
+                className={`flex-1 py-3 text-center text-xs font-medium transition-colors ${tab === t.id ? 'text-red-700 border-t-2 border-red-700 -mt-px' : 'text-gray-500 hover:text-gray-700'}`}>
+                {t.label}
               </button>
             ))}
           </div>
         </nav>
 
-        {/* Toast */}
         {toastMsg && <Toast message={toastMsg.msg} type={toastMsg.type} onClose={() => setToastMsg(null)} />}
+
+        {showEquipo && (
+          <GestionEquipoModal
+            onClose={() => setShowEquipo(false)}
+            user={user}
+            collaborators={collaborators}
+            setCollaborators={setCollaborators}
+          />
+        )}
       </div>
     </AppContext.Provider>
   );
 };
 
-ReactDOM.render(<App />, document.getElementById('root'));
+// ============================================
+// LOGIN
+// ============================================
+const LoginScreen = ({ onLogin }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password: password.trim()
+    });
+    if (authError) { setError('Email o contraseña incorrectos'); setLoading(false); return; }
+    onLogin(data.user);
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-red-700 to-red-900 flex flex-col items-center justify-center px-6">
+      <div className="mb-8 text-center">
+        <div className="text-6xl mb-3">🐓</div>
+        <h1 className="text-3xl font-bold text-white">GallosPR</h1>
+        <p className="text-red-200 mt-1 text-sm">Sistema de Gestión de Gallos</p>
+      </div>
+      <form onSubmit={handleLogin} className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6 space-y-4">
+        <h2 className="text-xl font-bold text-gray-800 text-center">Iniciar Sesión</h2>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" required />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
+          <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+        </div>
+        {error && <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg text-center">{error}</p>}
+        <button type="submit" disabled={loading}
+          className="w-full bg-red-700 text-white py-3 rounded-xl font-bold text-base hover:bg-red-800 disabled:opacity-50 transition">
+          {loading ? 'Entrando...' : 'Entrar'}
+        </button>
+      </form>
+      <p className="text-red-300 text-xs mt-6">Acceso solo por invitación</p>
+    </div>
+  );
+};
+
+// ============================================
+// RAÍZ
+// ============================================
+const AuthRoot = () => {
+  const [user, setUser] = useState(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setChecking(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (checking) return (
+    <div className="min-h-screen bg-red-700 flex items-center justify-center">
+      <div className="text-white text-center">
+        <div className="text-5xl mb-3">🐓</div>
+        <p className="text-lg font-semibold">Cargando...</p>
+      </div>
+    </div>
+  );
+
+  if (!user) return <LoginScreen onLogin={setUser} />;
+  return <App user={user} />;
+};
+
+ReactDOM.render(<AuthRoot />, document.getElementById('root'));
     </script>
 </body>
 </html>
