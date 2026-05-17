@@ -2225,6 +2225,8 @@ const App = ({ user }) => {
   const [activeOwnerId, setActiveOwnerId] = useState(user.id);
   const [collaborators, setCollaborators] = useState([]);
   const [showEquipo, setShowEquipo] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const isAdmin = (user.email || '').toLowerCase() === 'yoel2792@gmail.com';
   const canEdit = !isCollaborator || myRole === 'editor';
 
   useEffect(() => {
@@ -2293,7 +2295,12 @@ const App = ({ user }) => {
             {isCollaborator && <p className="text-xs text-red-200">Viendo gallos ajenos ({myRole})</p>}
           </div>
           <div className="flex items-center gap-2">
-            {!isCollaborator && (
+            {isAdmin && (
+              <button onClick={() => setShowAdmin(true)} className="bg-yellow-500 hover:bg-yellow-400 text-yellow-900 px-3 py-1.5 rounded-lg text-xs font-semibold">
+                ⚙️ Usuarios
+              </button>
+            )}
+            {!isCollaborator && !isAdmin && (
               <button onClick={() => setShowEquipo(true)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-semibold">
                 👥 Equipo
               </button>
@@ -2333,6 +2340,7 @@ const App = ({ user }) => {
             setCollaborators={setCollaborators}
           />
         )}
+        {showAdmin && <AdminModal onClose={() => setShowAdmin(false)} user={user} />}
       </div>
     </AppContext.Provider>
   );
