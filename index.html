@@ -8,7 +8,7 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.js"></script>
     <link rel="manifest" href="data:application/json,{}">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#dc2626">
@@ -25,14 +25,36 @@
     <div id="root"></div>
 
     <script type="text/babel">
-const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
+const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, Component } = React;
+
+// ============================================
+// ERROR BOUNDARY — muestra el error en pantalla en vez de página en blanco
+// ============================================
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: '20px', fontFamily: 'monospace', background: '#fff' }}>
+          <h2 style={{ color: 'red' }}>⚠️ Error en la app</h2>
+          <pre style={{ background: '#fee', padding: '12px', borderRadius: '8px', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {this.state.error.toString()}{'\n\n'}{this.state.error.stack}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================
 // SUPABASE CLIENT
 // ============================================
 const SUPABASE_URL = 'https://lpgzeiyparsqzhwopyvc.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZ3plaXlwYXJzcXpod29weXZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQzNzYsImV4cCI6MjA5MTA1MDM3Nn0.NIh_N6xxkwT-c_iROK0FMEfdgDYW89QwsMOv_k30S04';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const { createClient } = window.supabase;
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ============================================
 // CONTEXTO GLOBAL
@@ -2280,7 +2302,7 @@ const AuthRoot = () => {
   );
 
   if (!user) return <LoginScreen onLogin={setUser} />;
-  return <App user={user} />;
+  return <ErrorBoundary><App user={user} /></ErrorBoundary>;
 };
 
 ReactDOM.render(<AuthRoot />, document.getElementById('root'));
