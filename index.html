@@ -1997,6 +1997,93 @@ const DashboardModule = () => {
 
 
 // ============================================
+// TUTORIAL — bienvenida para nuevos usuarios
+// ============================================
+const TUTORIAL_STEPS = [
+  {
+    icon: '👋',
+    titulo: '¡Bienvenido a GallosPR!',
+    texto: 'Esta app te ayuda a gestionar tus gallos, entrenamientos y peleas en un solo lugar. En unos pasos te explicamos cómo funciona todo.',
+  },
+  {
+    icon: '🐓',
+    titulo: 'Pestaña Gallos',
+    texto: 'Aquí registras cada gallo con su nombre, peso, línea genética y características. Puedes ver su árbol genealógico y su historial completo.',
+  },
+  {
+    icon: '🏋️',
+    titulo: 'Pestaña Entrenamientos',
+    texto: 'Lleva el control de cada sesión de entrenamiento: fecha, duración, tipo de trabajo y notas. Así sabrás exactamente cómo va cada animal.',
+  },
+  {
+    icon: '⚔️',
+    titulo: 'Pestaña Peleas',
+    texto: 'Registra los resultados de cada pelea, el oponente, el estilo, y cómo le fue a tu gallo. El Dashboard te mostrará estadísticas automáticamente.',
+  },
+  {
+    icon: '📊',
+    titulo: '¡Listo para empezar!',
+    texto: 'El Dashboard resume todo: gallos activos, entrenamientos recientes y estadísticas de peleas. ¡Comienza añadiendo tu primer gallo en la pestaña Gallos!',
+  },
+];
+
+const TutorialModal = ({ onFinish, onSkip }) => {
+  const [step, setStep] = React.useState(0);
+  const current = TUTORIAL_STEPS[step];
+  const isLast = step === TUTORIAL_STEPS.length - 1;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+        <div className="text-6xl mb-4">{current.icon}</div>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">{current.titulo}</h2>
+        <p className="text-gray-600 text-sm leading-relaxed mb-6">{current.texto}</p>
+
+        {/* Indicadores de paso */}
+        <div className="flex justify-center gap-2 mb-6">
+          {TUTORIAL_STEPS.map((_, i) => (
+            <div key={i} className={`w-2 h-2 rounded-full transition-colors ${i === step ? 'bg-red-600' : 'bg-gray-300'}`} />
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <button onClick={onSkip} className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">
+            Saltar
+          </button>
+          {isLast ? (
+            <button onClick={onFinish} className="flex-1 py-2 rounded-lg bg-red-700 text-white text-sm font-semibold hover:bg-red-600">
+              ¡Empezar!
+            </button>
+          ) : (
+            <button onClick={() => setStep(s => s + 1)} className="flex-1 py-2 rounded-lg bg-red-700 text-white text-sm font-semibold hover:bg-red-600">
+              Siguiente →
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WelcomePrompt = ({ onYes, onNo }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+      <div className="text-5xl mb-3">🐓</div>
+      <h2 className="text-xl font-bold text-gray-800 mb-2">¡Bienvenido a GallosPR!</h2>
+      <p className="text-gray-600 text-sm mb-6">¿Quieres ver un tutorial rápido de cómo usar la app?</p>
+      <div className="flex gap-3">
+        <button onClick={onNo} className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">
+          No, gracias
+        </button>
+        <button onClick={onYes} className="flex-1 py-2 rounded-lg bg-red-700 text-white text-sm font-semibold hover:bg-red-600">
+          Sí, mostrar tutorial
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+// ============================================
 // ADMIN MODAL — solo visible para yoel2792@gmail.com
 // ============================================
 const AdminModal = ({ onClose, user }) => {
@@ -2227,7 +2314,23 @@ const App = ({ user }) => {
   const [showEquipo, setShowEquipo] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const isAdmin = (user.email || '').toLowerCase() === 'yoel2792@gmail.com';
+  const [showWelcome, setShowWelcome] = React.useState(false);
+  const [showTutorial, setShowTutorial] = React.useState(false);
+
+  const handleTutorialDone = React.useCallback(() => {
+    localStorage.setItem('tutorial_done_' + user.id, '1');
+    setShowTutorial(false);
+    setShowWelcome(false);
+  }, [user.id]);
   const canEdit = !isCollaborator || myRole === 'editor';
+
+  // Show tutorial for first-time users
+  React.useEffect(() => {
+    const key = 'tutorial_done_' + user.id;
+    if (!localStorage.getItem(key)) {
+      setShowWelcome(true);
+    }
+  }, [user.id]);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -2300,7 +2403,7 @@ const App = ({ user }) => {
                 ⚙️ Usuarios
               </button>
             )}
-            {!isCollaborator && !isAdmin && (
+            {!isCollaborator && (
               <button onClick={() => setShowEquipo(true)} className="bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded-lg text-xs font-semibold">
                 👥 Equipo
               </button>
@@ -2341,6 +2444,15 @@ const App = ({ user }) => {
           />
         )}
         {showAdmin && <AdminModal onClose={() => setShowAdmin(false)} user={user} />}
+        {showWelcome && !showTutorial && (
+          <WelcomePrompt
+            onYes={() => { setShowWelcome(false); setShowTutorial(true); }}
+            onNo={handleTutorialDone}
+          />
+        )}
+        {showTutorial && (
+          <TutorialModal onFinish={handleTutorialDone} onSkip={handleTutorialDone} />
+        )}
       </div>
     </AppContext.Provider>
   );
