@@ -1997,6 +1997,115 @@ const DashboardModule = () => {
 
 
 // ============================================
+// ADMIN MODAL — solo visible para yoel2792@gmail.com
+// ============================================
+const AdminModal = ({ onClose, user }) => {
+  const [usuarios, setUsuarios] = useState([]);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [nombre, setNombre] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState('error');
+
+  const load = async () => {
+    const { data } = await supabase.from('memberships')
+      .select('*').eq('owner_id', user.id).eq('role', 'app_user')
+      .order('created_at', { ascending: false });
+    setUsuarios(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!email.trim() || !password.trim()) { setMsg('Email y contraseña son requeridos'); setMsgType('error'); return; }
+    if (password.length < 6) { setMsg('Contraseña mínimo 6 caracteres'); setMsgType('error'); return; }
+    if (usuarios.some(u => u.collaborator_email === email.trim().toLowerCase())) {
+      setMsg('Ese email ya tiene cuenta.'); setMsgType('error'); return;
+    }
+    setSaving(true); setMsg('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password: password.trim(), role: 'app_user', owner_id: user.id })
+      });
+      const result = await res.json();
+      if (!res.ok) { setMsg(result.error || 'Error al crear usuario'); setMsgType('error'); setSaving(false); return; }
+      if (nombre.trim()) {
+        const newMem = result.membership_id || null;
+        if (newMem) await supabase.from('memberships').update({ collaborator_email: email.trim().toLowerCase() }).eq('id', newMem);
+      }
+      setMsg('Cuenta creada correctamente.'); setMsgType('ok');
+      setEmail(''); setPassword(''); setNombre('');
+      load();
+    } catch(e) { setMsg('Error: ' + e.message); setMsgType('error'); }
+    setSaving(false);
+  };
+
+  const handleToggle = async (u) => {
+    const newStatus = u.status === 'active' ? 'inactive' : 'active';
+    await supabase.from('memberships').update({ status: newStatus }).eq('id', u.id);
+    load();
+  };
+
+  const handleDelete = async (u) => {
+    if (!confirm('Eliminar la cuenta de ' + u.collaborator_email + '? El usuario no podrá entrar.')) return;
+    await supabase.from('memberships').delete().eq('id', u.id);
+    load();
+  };
+
+  const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('es-PR') : '';
+
+  return (
+    <Modal title="⚙️ Gestión de Usuarios" onClose={onClose} wide>
+      <div className="space-y-5">
+
+        {/* Crear usuario */}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-bold text-yellow-800">Crear nueva cuenta</p>
+          <Input type="email" placeholder="Email del usuario" value={email} onChange={e => setEmail(e.target.value)} />
+          <Input type="password" placeholder="Contraseña (mín. 6)" value={password} onChange={e => setPassword(e.target.value)} />
+          <Input type="text" placeholder="Nombre o referencia (opcional)" value={nombre} onChange={e => setNombre(e.target.value)} />
+          {msg && <p className={`text-xs p-2 rounded ${msgType === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>{msg}</p>}
+          <button onClick={handleCreate} disabled={saving}
+            className="w-full bg-yellow-500 text-yellow-900 font-bold py-2.5 rounded-lg hover:bg-yellow-400 disabled:opacity-50">
+            {saving ? 'Creando...' : '+ Crear cuenta'}
+          </button>
+        </div>
+
+        {/* Lista de usuarios */}
+        <div>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            Usuarios registrados ({usuarios.length})
+          </p>
+          {usuarios.length === 0
+            ? <p className="text-sm text-gray-400 text-center py-4">No hay usuarios registrados aún</p>
+            : <div className="space-y-2">
+                {usuarios.map(u => (
+                  <div key={u.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800 truncate">{u.collaborator_email}</p>
+                      <p className="text-xs text-gray-400">Creado: {fmt(u.created_at)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                      <button onClick={() => handleToggle(u)}
+                        className={`text-xs px-2.5 py-1 rounded-full font-semibold ${u.status === 'active' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}>
+                        {u.status === 'active' ? 'Activo' : 'Inactivo'}
+                      </button>
+                      <button onClick={() => handleDelete(u)} className="text-red-400 hover:text-red-600 text-lg">🗑</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+          }
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// ============================================
 // GESTIÓN DE EQUIPO
 // ============================================
 const GestionEquipoModal = ({ onClose, user, collaborators, setCollaborators }) => {
@@ -2189,7 +2298,7 @@ const App = ({ user }) => {
                 👥 Equipo
               </button>
             )}
-            <button onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+            <button onClick={() => { supabase.auth.signOut().then(() => { window.location.href = window.location.pathname; }); }}
               className="bg-red-800 hover:bg-red-900 px-3 py-1.5 rounded-lg text-xs font-semibold">
               Salir
             </button>
