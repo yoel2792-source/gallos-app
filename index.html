@@ -685,10 +685,10 @@ const GeneticaModule = () => {
           <h2 className="text-xl font-bold text-gray-800">Genética</h2>
           <p className="text-sm text-gray-500">{gallos.length} gallos registrados</p>
         </div>
-        <button onClick={() => { setForm(emptyForm); setEditingGallo(null); setPadreSelected(null); setMadreSelected(null); setShowForm(true); }}
+        {canEdit && <button onClick={() => { setForm(emptyForm); setEditingGallo(null); setPadreSelected(null); setMadreSelected(null); setShowForm(true); }}
           className="bg-red-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-red-700 active:bg-red-800">
           + Nuevo Gallo
-        </button>
+        </button>}
       </div>
 
       {/* Búsqueda */}
@@ -722,7 +722,7 @@ const GeneticaModule = () => {
               </div>
               <div className="flex items-center gap-1 ml-2">
                 <button onClick={() => setShowArbol(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-lg" title="Árbol">🌳</button>
-                <button onClick={() => handleDelete(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 text-lg" title="Eliminar">🗑</button>
+                {canEdit && <button onClick={() => handleDelete(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 text-lg" title="Eliminar">🗑</button>}
               </div>
             </div>
           </div>
@@ -829,10 +829,10 @@ const GeneticaModule = () => {
                 onChange={e => setForm({...form, observaciones: e.target.value})} />
             </Field>
 
-            <button onClick={handleSave}
+            {canEdit && <button onClick={handleSave}
               className="w-full bg-red-600 text-white py-3 rounded-lg font-bold text-base hover:bg-red-700 active:bg-red-800">
               {editingGallo ? 'Actualizar Gallo' : 'Crear Gallo'}
-            </button>
+            </button>}
           </div>
         </Modal>
       )}
@@ -977,10 +977,10 @@ const EntrenamientosModule = () => {
           <h2 className="text-xl font-bold text-gray-800">Entrenamientos</h2>
           <p className="text-sm text-gray-500">{entrenamientos.length} registros</p>
         </div>
-        <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
+        {canEdit && <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
           className="bg-green-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-green-700">
           + Nuevo
-        </button>
+        </button>}
       </div>
 
       {/* Filtro por gallo */}
@@ -1020,8 +1020,8 @@ const EntrenamientosModule = () => {
                   </p>
                 </div>
                 <div className="flex gap-1">
-                  <button onClick={(ev) => { ev.stopPropagation(); handleEdit(e); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-sm">✏️</button>
-                  <button onClick={(ev) => { ev.stopPropagation(); handleDelete(e.id); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-50 text-sm">🗑</button>
+                  {canEdit && <button onClick={(ev) => { ev.stopPropagation(); handleEdit(e); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-sm">✏️</button>}
+                  {canEdit && <button onClick={(ev) => { ev.stopPropagation(); handleDelete(e.id); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-50 text-sm">🗑</button>}
                 </div>
               </div>
             </div>
@@ -1169,9 +1169,9 @@ const EntrenamientosModule = () => {
               <MultiPhotoUpload values={form.fotos} onChange={(v) => setForm({...form, fotos: v})} label="Fotos del Entrenamiento" />
             </div>
 
-            <button onClick={handleSave} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700">
+            {canEdit && <button onClick={handleSave} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700">
               {editingId ? 'Actualizar' : 'Guardar'} Entrenamiento
-            </button>
+            </button>}
           </div>
         </Modal>
       )}
@@ -1272,10 +1272,10 @@ const PeleasModule = () => {
           <h2 className="text-xl font-bold text-gray-800">Peleas</h2>
           <p className="text-sm text-gray-500">{peleas.length} registradas</p>
         </div>
-        <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
+        {canEdit && <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
           className="bg-purple-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-purple-700">
           + Nueva Pelea
-        </button>
+        </button>}
       </div>
 
       {/* Stats */}
@@ -1316,8 +1316,8 @@ const PeleasModule = () => {
                   {p.como_fue && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded mt-1 inline-block">{p.como_fue}</span>}
                 </div>
                 <div className="flex gap-1">
-                  <button onClick={(ev) => { ev.stopPropagation(); handleEdit(p); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/50 text-sm">✏️</button>
-                  <button onClick={(ev) => { ev.stopPropagation(); handleDelete(p.id); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/50 text-sm">🗑</button>
+                  {canEdit && <button onClick={(ev) => { ev.stopPropagation(); handleEdit(p); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/50 text-sm">✏️</button>}
+                  {canEdit && <button onClick={(ev) => { ev.stopPropagation(); handleDelete(p.id); }} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/50 text-sm">🗑</button>}
                 </div>
               </div>
             </div>
@@ -1420,9 +1420,9 @@ const PeleasModule = () => {
             <Field label="Puntos Negativos"><Textarea placeholder="¿Qué faltó?" value={form.puntos_negativos} onChange={e => setForm({...form, puntos_negativos: e.target.value})} /></Field>
             <Field label="Lesiones"><Textarea placeholder="Descripción de lesiones..." value={form.lesiones} onChange={e => setForm({...form, lesiones: e.target.value})} /></Field>
 
-            <button onClick={handleSave} className="w-full bg-purple-600 text-white py-3 rounded-lg font-bold hover:bg-purple-700">
+            {canEdit && <button onClick={handleSave} className="w-full bg-purple-600 text-white py-3 rounded-lg font-bold hover:bg-purple-700">
               {editingId ? 'Actualizar' : 'Guardar'} Pelea
-            </button>
+            </button>}
           </div>
         </Modal>
       )}
@@ -2010,6 +2010,10 @@ const GestionEquipoModal = ({ onClose, user, collaborators, setCollaborators }) 
   const handleAdd = async () => {
     if (!email.trim() || !password.trim()) { setErrorMsg('Email y contraseña son requeridos'); return; }
     if (password.length < 6) { setErrorMsg('La contraseña debe tener al menos 6 caracteres'); return; }
+    const emailLower = email.trim().toLowerCase();
+    if (collaborators.some(m => m.collaborator_email === emailLower)) {
+      setErrorMsg('Este email ya está en tu equipo.'); return;
+    }
     setSaving(true); setErrorMsg(''); setSuccessMsg('');
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -2103,7 +2107,7 @@ const GestionEquipoModal = ({ onClose, user, collaborators, setCollaborators }) 
 // APP PRINCIPAL
 // ============================================
 const App = ({ user }) => {
-  const [tab, setTab] = useState('gallos');
+  const [tab, setTab] = useState('dashboard');
   const [gallos, setGallos] = useState([]);
   const [opciones, setOpciones] = useState({});
   const [toastMsg, setToastMsg] = useState(null);
@@ -2165,10 +2169,10 @@ const App = ({ user }) => {
   }, [activeOwnerId]);
 
   const TABS = [
-    { id: 'gallos', label: '🐓 Gallos' },
-    { id: 'entrenamientos', label: '🏋️ Entrena' },
-    { id: 'peleas', label: '⚔️ Peleas' },
     { id: 'dashboard', label: '📊 Dashboard' },
+    { id: 'gallos', label: '🐓 Gallos' },
+    { id: 'entrenamientos', label: '🏋️ Entrenamientos' },
+    { id: 'peleas', label: '⚔️ Peleas' },
   ];
 
   return (
