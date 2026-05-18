@@ -88,7 +88,7 @@ const Modal = ({ title, onClose, children, wide }) => (
         <h3 className="text-lg font-bold text-gray-800">{title}</h3>
         <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">✕</button>
       </div>
-      <div className="p-4">{children}</div>
+      <div className="p-4 pb-20 md:pb-6">{children}</div>
     </div>
   </div>
 );
@@ -344,7 +344,7 @@ const LeyendaModal = ({ cat, onClose }) => {
   const todasOpts = cat.subs.flatMap(s => s.opts);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{background:'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-t-2xl max-h-[80vh] overflow-y-auto shadow-2xl fade-in" onClick={e => e.stopPropagation()}>
+      <div className="bg-white w-full max-w-lg rounded-t-2xl max-h-[80vh] overflow-y-auto shadow-2xl fade-in pb-20" onClick={e => e.stopPropagation()}>
         <div className={`sticky top-0 px-4 py-3 flex justify-between items-center rounded-t-2xl ${c.hdr}`}>
           <span className="font-bold text-sm">Leyenda — {cat.label}</span>
           <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/40 text-white text-sm">✕</button>
