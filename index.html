@@ -1445,9 +1445,11 @@ const DashboardModule = () => {
   const [showDetEnt, setShowDetEnt] = useState(null);
   const [showDetPel, setShowDetPel] = useState(null);
   const [viewingPhoto, setViewingPhoto] = useState(null);
+  const topRef = useRef(null);
 
   const loadData = async (gallo) => {
     setSelected(gallo);
+    setTimeout(() => topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     const [{ data: ents }, { data: pels }] = await Promise.all([
       supabase.from('entrenamientos').select('*').eq('gallo_id', gallo.id).order('fecha', { ascending: false }).limit(50),
       supabase.from('peleas').select('*').eq('gallo_id', gallo.id).order('fecha', { ascending: false }).limit(50),
@@ -1473,6 +1475,7 @@ const DashboardModule = () => {
       <h2 className="text-xl font-bold text-gray-800 mb-1">Dashboard</h2>
       <p className="text-sm text-gray-500 mb-4">Busca un gallo para ver toda su información</p>
 
+      <div ref={topRef} />
       <GalloSearch gallos={gallos} selected={selected}
         onSelect={loadData} onClear={() => { setSelected(null); setEntrenamientos([]); setPeleas([]); }}
         placeholder="Buscar gallo por nombre o pinches..." />
