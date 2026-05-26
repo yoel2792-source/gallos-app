@@ -2339,12 +2339,21 @@ const App = ({ user }) => {
     const checkAccess = async () => {
       const { data: active } = await supabase.from('memberships')
         .select('*').eq('collaborator_id', user.id).eq('status', 'active').maybeSingle();
-      if (active) { setIsCollaborator(true); setMyRole(active.role); setActiveOwnerId(active.owner_id); return; }
+      if (active) {
+        // app_user = usuario independiente con sus propios datos, NO colaborador
+        if (active.role !== 'app_user') {
+          setIsCollaborator(true); setMyRole(active.role); setActiveOwnerId(active.owner_id);
+        }
+        return;
+      }
       const { data: pending } = await supabase.from('memberships')
         .select('*').eq('collaborator_email', user.email).eq('status', 'pending').maybeSingle();
       if (pending) {
         await supabase.from('memberships').update({ collaborator_id: user.id, status: 'active' }).eq('id', pending.id);
-        setIsCollaborator(true); setMyRole(pending.role); setActiveOwnerId(pending.owner_id); return;
+        if (pending.role !== 'app_user') {
+          setIsCollaborator(true); setMyRole(pending.role); setActiveOwnerId(pending.owner_id);
+        }
+        return;
       }
       const { data: collabs } = await supabase.from('memberships')
         .select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
