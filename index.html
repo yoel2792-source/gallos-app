@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GallosPR - Sistema de Gestión</title>
+    <title>Gallero PR - Sistema de Gestión</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -2071,7 +2071,7 @@ const DashboardModule = () => {
 const TUTORIAL_STEPS = [
   {
     icon: '👋',
-    titulo: '¡Bienvenido a GallosPR!',
+    titulo: '¡Bienvenido a Gallero PR!',
     texto: 'Esta app te ayuda a gestionar tus gallos, entrenamientos y peleas en un solo lugar. En unos pasos te explicamos cómo funciona todo.',
   },
   {
@@ -2138,7 +2138,7 @@ const WelcomePrompt = ({ onYes, onNo }) => (
   <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
     <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
       <div className="text-5xl mb-3">🐓</div>
-      <h2 className="text-xl font-bold text-gray-800 mb-2">¡Bienvenido a GallosPR!</h2>
+      <h2 className="text-xl font-bold text-gray-800 mb-2">¡Bienvenido a Gallero PR!</h2>
       <p className="text-gray-600 text-sm mb-6">¿Quieres ver un tutorial rápido de cómo usar la app?</p>
       <div className="flex gap-3">
         <button onClick={onNo} className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">
@@ -2472,7 +2472,7 @@ const App = ({ user }) => {
       <div className="min-h-screen bg-gray-100 pb-20">
         <div className="bg-red-700 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-md">
           <div>
-            <h1 className="text-lg font-bold leading-tight">🐓 GallosPR</h1>
+            <h1 className="text-lg font-bold leading-tight">🐓 Gallero PR</h1>
             {isCollaborator && <p className="text-xs text-red-200">Viendo gallos ajenos ({myRole})</p>}
           </div>
           <div className="flex items-center gap-2">
@@ -2561,7 +2561,7 @@ const LoginScreen = ({ onLogin }) => {
     <div className="min-h-screen bg-gradient-to-b from-red-700 to-red-900 flex flex-col items-center justify-center px-6">
       <div className="mb-8 text-center">
         <div className="text-6xl mb-3">🐓</div>
-        <h1 className="text-3xl font-bold text-white">GallosPR</h1>
+        <h1 className="text-3xl font-bold text-white">Gallero PR</h1>
         <p className="text-red-200 mt-1 text-sm">Sistema de Gestión de Gallos</p>
       </div>
       <form onSubmit={handleLogin} className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6 space-y-4">
