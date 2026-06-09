@@ -845,48 +845,48 @@ const GeneticaModule = () => {
 // ============================================
 const VideoAnalysisModal = ({ gallo, onClose }) => {
   const { gallos } = useContext(AppContext);
-  const [step, setStep] = React.useState('setup');
-  const [momento, setMomento] = React.useState('inicio');
-  const [notas, setNotas] = React.useState('');
-  const [selectedGallo, setSelectedGallo] = React.useState(gallo || null);
-  const [galloDesc, setGalloDesc] = React.useState(
+  const [step, setStep] = useState('setup');
+  const [momento, setMomento] = useState('inicio');
+  const [notas, setNotas] = useState('');
+  const [selectedGallo, setSelectedGallo] = useState(gallo || null);
+  const [galloDesc, setGalloDesc] = useState(
     gallo ? ((gallo.nombre || ('#' + gallo.numero_pinches)) + (gallo.color ? ', color ' + gallo.color : '')) : ''
   );
-  const [mediaRecorder, setMediaRecorder] = React.useState(null);
-  const [videoBlob, setVideoBlob] = React.useState(null);
-  const [videoUrl, setVideoUrl] = React.useState(null);
-  const [recording, setRecording] = React.useState(false);
-  const [seconds, setSeconds] = React.useState(0);
-  const [analysis, setAnalysis] = React.useState('');
-  const [error, setError] = React.useState('');
-  const videoRef = React.useRef(null);
-  const streamRef = React.useRef(null);
-  const chunksRef = React.useRef([]);
-  const timerRef = React.useRef(null);
-  const fileInputRef = React.useRef(null);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [videoBlob, setVideoBlob] = useState(null);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [analysis, setAnalysis] = useState('');
+  const [error, setError] = useState('');
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const fileInputRef = useRef(null);
   const MAX_SECONDS = 90;
 
   const stopCamera = () => {
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
   };
 
+  useEffect(() => {
+    return () => { stopCamera(); if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 18 * 1024 * 1024) {
-      setError('El video pesa ' + (file.size/1024/1024).toFixed(1) + 'MB. Maximo 18MB. Recorta o comprime el video.');
+      setError('El video pesa ' + (file.size/1024/1024).toFixed(1) + 'MB. Máximo 18MB.');
       return;
     }
     setError('');
     setVideoBlob(file);
     setVideoUrl(URL.createObjectURL(file));
-    setSeconds(Math.round(file.size / 200000)); // estimado aproximado
+    setSeconds(0);
     setStep('preview');
   };
-
-  React.useEffect(() => {
-    return () => { stopCamera(); if (timerRef.current) clearInterval(timerRef.current); };
-  }, []);
 
   const startCamera = async () => {
     setError('');
@@ -899,7 +899,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
       if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
       setStep('recording');
     } catch (e) {
-      setError('No se pudo acceder a la camara: ' + e.message);
+      setError('No se pudo acceder a la cámara: ' + e.message);
     }
   };
 
@@ -941,7 +941,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
     setError('');
     try {
       if (videoBlob.size > 18 * 1024 * 1024) {
-        setError('El video pesa ' + (videoBlob.size/1024/1024).toFixed(1) + 'MB, es muy grande. Graba menos de 60s.');
+        setError('Video muy grande. Graba menos de 60s.');
         setStep('preview'); return;
       }
       const arrayBuffer = await videoBlob.arrayBuffer();
@@ -957,7 +957,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
         body: JSON.stringify({
-          videoBase64: base64, mimeType: 'video/webm',
+          videoBase64: base64, mimeType: videoBlob.type || 'video/webm',
           galloDescripcion: galloDesc,
           momentoEntrenamiento: momento,
           notas: notas
@@ -972,192 +972,183 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
     }
   };
 
-  const formatAnalysis = (text) =>
-    text.split('\n').map((line, i) => {
-      const html = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      return React.createElement('p', { key: i, className: 'mb-1.5 text-sm leading-relaxed', dangerouslySetInnerHTML: { __html: html } });
-    });
-
   const MOMENTOS = [
-    { value: 'inicio', label: 'Inicio', icon: '🟢', desc: 'Gallo fresco' },
-    { value: 'medio',  label: 'Medio',  icon: '🟡', desc: '5-10 min' },
-    { value: 'final',  label: 'Final',  icon: '🔴', desc: '15+ min' },
+    { value: 'inicio', label: '🟢 Inicio', desc: 'Gallo fresco' },
+    { value: 'medio',  label: '🟡 Medio',  desc: '5-10 min' },
+    { value: 'final',  label: '🔴 Final',  desc: '15+ min' },
   ];
 
   return (
-    React.createElement('div', { className: 'fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col' },
-      React.createElement('div', { className: 'bg-gray-900 text-white px-4 py-3 flex items-center justify-between flex-shrink-0' },
-        React.createElement('div', null,
-          React.createElement('h3', { className: 'font-bold' }, '🎥 Analisis IA'),
-          gallo && React.createElement('p', { className: 'text-xs text-gray-400' }, gallo.nombre || ('#' + gallo.numero_pinches))
-        ),
-        React.createElement('button', { onClick: () => { stopCamera(); onClose(); }, className: 'w-8 h-8 flex items-center justify-center rounded-full bg-gray-700 text-white' }, '✕')
-      ),
-      React.createElement('div', { className: 'flex-1 overflow-y-auto' },
+    <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col">
+      {/* Header */}
+      <div className="bg-gray-900 text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
+        <div>
+          <h3 className="font-bold">🎥 Análisis IA</h3>
+          {selectedGallo && <p className="text-xs text-gray-400">{selectedGallo.nombre || ('#' + selectedGallo.numero_pinches)}</p>}
+        </div>
+        <button onClick={() => { stopCamera(); onClose(null); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-700 text-white">✕</button>
+      </div>
 
-        step === 'setup' && React.createElement('div', { className: 'p-4 space-y-4' },
-          React.createElement('div', { className: 'bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800' },
-            React.createElement('p', { className: 'font-semibold mb-1' }, 'Configura antes de grabar'),
-            React.createElement('p', { className: 'text-xs' }, 'La IA usara esta info para identificar tu gallo correctamente.')
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-2' }, 'Gallo a analizar'),
-            React.createElement('select', {
-              value: selectedGallo?.id || '',
-              onChange: e => {
+      <div className="flex-1 overflow-y-auto">
+
+        {/* SETUP */}
+        {step === 'setup' && (
+          <div className="p-4 space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+              <p className="font-semibold mb-1">Configura antes de grabar</p>
+              <p className="text-xs">La IA usará esta info para identificar tu gallo correctamente.</p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-2">Gallo a analizar</label>
+              <select value={selectedGallo?.id || ''} onChange={e => {
                 const g = gallos.find(g => g.id === e.target.value) || null;
                 setSelectedGallo(g);
                 if (g) setGalloDesc((g.nombre || ('#' + g.numero_pinches)) + (g.color ? ', color ' + g.color : ''));
-              },
-              className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 mb-3'
-            },
-              React.createElement('option', { value: '' }, '-- Seleccionar gallo --'),
-              gallos.filter(g => g.amarrado).map(g =>
-                React.createElement('option', { key: g.id, value: g.id },
-                  (g.nombre || ('#' + g.numero_pinches)) + (g.color ? ' · ' + g.color : '')
-                )
-              )
-            )
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-1' }, 'Como identificar tu gallo (para la IA) *'),
-            React.createElement('input', { type: 'text', value: galloDesc, onChange: e => setGalloDesc(e.target.value),
-              placeholder: 'ej: gallo colorado, el mas grande, espuelas largas',
-              className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500' }),
-            React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, 'Color, tamano u otro detalle que lo diferencie de la chata/muneco')
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-2' }, 'Momento del entrenamiento'),
-            React.createElement('div', { className: 'grid grid-cols-3 gap-2' },
-              MOMENTOS.map(m =>
-                React.createElement('button', { key: m.value, onClick: () => setMomento(m.value),
-                  className: 'p-2 rounded-lg border text-center transition ' + (momento === m.value ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white') },
-                  React.createElement('p', { className: 'text-sm' }, m.icon + ' ' + m.label),
-                  React.createElement('p', { className: 'text-xs text-gray-500' }, m.desc)
-                )
-              )
-            )
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-1' }, 'Notas (opcional)'),
-            React.createElement('textarea', { value: notas, onChange: e => setNotas(e.target.value), rows: 2,
-              placeholder: 'ej: lesion en pata derecha, primer dia de chata esta semana...',
-              className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500' })
-          ),
-          error && React.createElement('p', { className: 'text-red-600 text-sm bg-red-50 p-2 rounded' }, error),
-          React.createElement('input', {
-            ref: fileInputRef, type: 'file', accept: 'video/*', style: { display: 'none' },
-            onChange: handleFileUpload
-          }),
-          React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-            React.createElement('button', { onClick: () => fileInputRef.current?.click(), disabled: !galloDesc.trim(),
-              className: 'py-3 rounded-xl border-2 border-purple-300 text-purple-700 font-bold hover:bg-purple-50 disabled:opacity-40 disabled:cursor-not-allowed' },
-              '📂 Subir video'
-            ),
-            React.createElement('button', { onClick: startCamera, disabled: !galloDesc.trim(),
-              className: 'py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed' },
-              '📹 Grabar ahora'
-            )
-          )
-        ),
+              }} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3">
+                <option value="">-- Seleccionar gallo --</option>
+                {gallos.filter(g => g.amarrado).map(g =>
+                  <option key={g.id} value={g.id}>{g.nombre || ('#' + g.numero_pinches)}{g.color ? ' · ' + g.color : ''}</option>
+                )}
+              </select>
+            </div>
 
-        step === 'recording' && React.createElement('div', { className: 'relative bg-black', style: { minHeight: '70vh' } },
-          React.createElement('video', { ref: videoRef, autoPlay: true, muted: true, playsInline: true,
-            className: 'w-full object-cover', style: { maxHeight: '70vh' } }),
-          recording && React.createElement('div', { className: 'absolute top-3 left-0 right-0 flex justify-center' },
-            React.createElement('div', { className: 'bg-black bg-opacity-60 text-white px-3 py-1 rounded-full flex items-center gap-2' },
-              React.createElement('span', { className: 'w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block' }),
-              React.createElement('span', { className: 'font-mono font-bold' },
-                String(Math.floor(seconds/60)).padStart(2,'0') + ':' + String(seconds%60).padStart(2,'0')),
-              React.createElement('span', { className: 'text-xs text-gray-300' }, '/ ' + MAX_SECONDS + 's max')
-            )
-          ),
-          recording && React.createElement('div', { className: 'absolute bottom-24 left-4 right-4 bg-gray-700 rounded-full h-1.5' },
-            React.createElement('div', { className: 'bg-red-500 h-1.5 rounded-full transition-all', style: { width: ((seconds/MAX_SECONDS)*100) + '%' } })
-          ),
-          React.createElement('div', { className: 'absolute bottom-6 left-0 right-0 flex justify-center' },
-            !recording
-              ? React.createElement('button', { onClick: startRecording,
-                  className: 'w-16 h-16 rounded-full bg-red-600 border-4 border-white shadow-xl flex items-center justify-center' },
-                  React.createElement('span', { className: 'w-6 h-6 rounded-full bg-white' })
-                )
-              : React.createElement('button', { onClick: stopRecording,
-                  className: 'w-16 h-16 rounded-full bg-red-600 border-4 border-white shadow-xl flex items-center justify-center' },
-                  React.createElement('span', { className: 'w-5 h-5 rounded bg-white' })
-                )
-          ),
-          !recording && React.createElement('div', { className: 'absolute top-3 right-3' },
-            React.createElement('p', { className: 'text-white text-xs bg-black bg-opacity-50 px-2 py-1 rounded' }, 'Presiona para grabar')
-          )
-        ),
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">¿Cómo identificarlo en el video? *</label>
+              <input type="text" value={galloDesc} onChange={e => setGalloDesc(e.target.value)}
+                placeholder="ej: gallo colorado, el más grande, espuelas largas"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              <p className="text-xs text-gray-400 mt-1">Color u otro detalle que lo diferencie de la chata/muñeco</p>
+            </div>
 
-        step === 'preview' && videoUrl && React.createElement('div', { className: 'p-4 space-y-4' },
-          React.createElement('video', { src: videoUrl, controls: true, playsInline: true,
-            className: 'w-full rounded-xl bg-black', style: { maxHeight: '55vh' } }),
-          React.createElement('div', { className: 'bg-gray-50 rounded-lg p-3 text-sm' },
-            React.createElement('p', { className: 'text-gray-600' },
-              '⏱ Duracion: ', React.createElement('strong', null, seconds + 's'),
-              ' · 📦 Tamano: ', React.createElement('strong', null, (videoBlob?.size/1024/1024).toFixed(1) + 'MB')
-            )
-          ),
-          error && React.createElement('p', { className: 'text-red-600 text-sm bg-red-50 p-3 rounded-lg' }, error),
-          React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-            React.createElement('button', { onClick: retake,
-              className: 'py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50' },
-              '🔄 Volver a grabar'),
-            React.createElement('button', { onClick: analyzeVideo,
-              className: 'py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700' },
-              '🤖 Analizar con IA')
-          )
-        ),
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-2">Momento del entrenamiento</label>
+              <div className="grid grid-cols-3 gap-2">
+                {MOMENTOS.map(m => (
+                  <button key={m.value} onClick={() => setMomento(m.value)}
+                    className={'p-2 rounded-lg border text-center transition ' + (momento === m.value ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white')}>
+                    <p className="text-sm">{m.label}</p>
+                    <p className="text-xs text-gray-500">{m.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        step === 'analyzing' && React.createElement('div', {
-          className: 'flex flex-col items-center justify-center p-8 space-y-5', style: { minHeight: '60vh' } },
-          React.createElement('div', { className: 'w-20 h-20 rounded-full bg-purple-100 flex items-center justify-center' },
-            React.createElement('span', { className: 'text-4xl animate-bounce' }, '🤖')
-          ),
-          React.createElement('div', { className: 'text-center' },
-            React.createElement('p', { className: 'font-bold text-gray-800 text-lg' }, 'Analizando el video...'),
-            React.createElement('p', { className: 'text-gray-500 text-sm mt-1' }, 'Gemini AI esta evaluando tecnica, velocidad y rendimiento')
-          ),
-          React.createElement('div', { className: 'flex gap-1.5' },
-            [0,1,2].map(i => React.createElement('div', { key: i,
-              className: 'w-2 h-2 rounded-full bg-purple-500 animate-bounce',
-              style: { animationDelay: (i*0.2) + 's' } }))
-          ),
-          React.createElement('p', { className: 'text-xs text-gray-400 text-center' }, 'Puede tomar 15-30 segundos...')
-        ),
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Notas (opcional)</label>
+              <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={2}
+                placeholder="ej: lesión en pata derecha, primer día de chata..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
+            </div>
 
-        step === 'result' && analysis && React.createElement('div', { className: 'p-4 space-y-4' },
-          React.createElement('div', { className: 'bg-purple-50 border border-purple-200 rounded-xl p-4' },
-            React.createElement('div', { className: 'flex items-center gap-2 mb-3' },
-              React.createElement('span', { className: 'text-2xl' }, '🤖'),
-              React.createElement('div', null,
-                React.createElement('p', { className: 'font-bold text-purple-800' }, 'Analisis Completo'),
-                React.createElement('p', { className: 'text-xs text-purple-600' },
-                  (gallo?.nombre || 'Tu gallo') + ' · ' + (MOMENTOS.find(m => m.value === momento)?.label || '')
-                )
-              )
-            ),
-            React.createElement('div', { className: 'text-gray-700 leading-relaxed' }, formatAnalysis(analysis))
-          ),
-          React.createElement('div', { className: 'space-y-2' },
-            React.createElement('button', {
-              onClick: () => { stopCamera(); onClose({ analysis, gallo: selectedGallo }); },
-              className: 'w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700'
-            }, '💾 Guardar en entrenamiento'),
-            React.createElement('div', { className: 'grid grid-cols-2 gap-2' },
-              React.createElement('button', { onClick: retake,
-                className: 'py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 text-sm hover:bg-gray-50' },
-                '🎥 Nuevo video'),
-              React.createElement('button', { onClick: () => { stopCamera(); onClose(null); },
-                className: 'py-3 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50' },
-                '✕ Cerrar')
-            )
-          )
-        )
-      )
-    )
+            {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+
+            <input ref={fileInputRef} type="file" accept="video/*" style={{display:'none'}} onChange={handleFileUpload} />
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => fileInputRef.current?.click()} disabled={!galloDesc.trim()}
+                className="py-3 rounded-xl border-2 border-purple-300 text-purple-700 font-bold hover:bg-purple-50 disabled:opacity-40">
+                📂 Subir video
+              </button>
+              <button onClick={startCamera} disabled={!galloDesc.trim()}
+                className="py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700 disabled:opacity-40">
+                📹 Grabar ahora
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* RECORDING */}
+        {step === 'recording' && (
+          <div className="relative bg-black" style={{minHeight:'70vh'}}>
+            <video ref={videoRef} autoPlay muted playsInline className="w-full object-cover" style={{maxHeight:'70vh'}} />
+            {recording && (
+              <div className="absolute top-3 left-0 right-0 flex justify-center">
+                <div className="bg-black bg-opacity-60 text-white px-3 py-1 rounded-full flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
+                  <span className="font-mono font-bold">{String(Math.floor(seconds/60)).padStart(2,'0')}:{String(seconds%60).padStart(2,'0')}</span>
+                  <span className="text-xs text-gray-300">/ {MAX_SECONDS}s</span>
+                </div>
+              </div>
+            )}
+            {recording && (
+              <div className="absolute bottom-24 left-4 right-4 bg-gray-700 rounded-full h-1.5">
+                <div className="bg-red-500 h-1.5 rounded-full transition-all" style={{width: (seconds/MAX_SECONDS*100)+'%'}} />
+              </div>
+            )}
+            <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+              {!recording
+                ? <button onClick={startRecording} className="w-16 h-16 rounded-full bg-red-600 border-4 border-white shadow-xl flex items-center justify-center">
+                    <span className="w-6 h-6 rounded-full bg-white" />
+                  </button>
+                : <button onClick={stopRecording} className="w-16 h-16 rounded-full bg-red-600 border-4 border-white shadow-xl flex items-center justify-center">
+                    <span className="w-5 h-5 rounded bg-white" />
+                  </button>
+              }
+            </div>
+            {!recording && <p className="absolute top-3 right-3 text-white text-xs bg-black bg-opacity-50 px-2 py-1 rounded">Presiona para grabar</p>}
+          </div>
+        )}
+
+        {/* PREVIEW */}
+        {step === 'preview' && videoUrl && (
+          <div className="p-4 space-y-4">
+            <video src={videoUrl} controls playsInline className="w-full rounded-xl bg-black" style={{maxHeight:'55vh'}} />
+            <div className="bg-gray-50 rounded-lg p-3 text-sm">
+              <p className="text-gray-600">📦 Tamaño: <strong>{videoBlob ? (videoBlob.size/1024/1024).toFixed(1) : '?'}MB</strong></p>
+            </div>
+            {error && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-lg">{error}</p>}
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={retake} className="py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50">🔄 Volver</button>
+              <button onClick={analyzeVideo} className="py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700">🤖 Analizar con IA</button>
+            </div>
+          </div>
+        )}
+
+        {/* ANALYZING */}
+        {step === 'analyzing' && (
+          <div className="flex flex-col items-center justify-center p-8 space-y-5" style={{minHeight:'60vh'}}>
+            <div className="w-20 h-20 rounded-full bg-purple-100 flex items-center justify-center">
+              <span className="text-4xl animate-bounce">🤖</span>
+            </div>
+            <div className="text-center">
+              <p className="font-bold text-gray-800 text-lg">Analizando el video...</p>
+              <p className="text-gray-500 text-sm mt-1">Gemini AI está evaluando técnica, velocidad y rendimiento</p>
+            </div>
+            <div className="flex gap-1.5">
+              {[0,1,2].map(i => <div key={i} className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{animationDelay: i*0.2+'s'}} />)}
+            </div>
+            <p className="text-xs text-gray-400 text-center">Puede tomar 15-30 segundos...</p>
+          </div>
+        )}
+
+        {/* RESULT */}
+        {step === 'result' && (
+          <div className="p-4 space-y-4">
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl">🤖</span>
+                <div>
+                  <p className="font-bold text-purple-800">Análisis Completo</p>
+                  <p className="text-xs text-purple-600">{selectedGallo?.nombre || 'Tu gallo'} · {MOMENTOS.find(m => m.value === momento)?.label}</p>
+                </div>
+              </div>
+              <div className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">{analysis}</div>
+            </div>
+            <div className="space-y-2">
+              <button onClick={() => { stopCamera(); onClose({ analysis, gallo: selectedGallo }); }}
+                className="w-full py-3 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700">
+                💾 Guardar en entrenamiento
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={retake} className="py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 text-sm hover:bg-gray-50">🎥 Nuevo video</button>
+                <button onClick={() => { stopCamera(); onClose(null); }} className="py-3 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">✕ Cerrar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
   );
 };
 
