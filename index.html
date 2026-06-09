@@ -857,7 +857,8 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
   const [videoUrl, setVideoUrl] = useState(null);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
-  const [analysis, setAnalysis] = useState('');
+  const [analysis, setAnalysis] = useState(null);
+  const [rawText, setRawText] = useState('');
   const [error, setError] = useState('');
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -1012,6 +1013,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
       const result = await res.json();
       if (!res.ok || result.error) { setError(result.error || 'Error al analizar'); setStep('preview'); return; }
       setAnalysis(result.analysis);
+      setRawText(result.raw || '');
       setStep('result');
     } catch (e) {
       setError('Error: ' + e.message); setStep('preview');
@@ -1184,20 +1186,128 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
         )}
 
         {/* RESULT */}
-        {step === 'result' && (
+        {step === 'result' && analysis && (
           <div className="p-4 space-y-4">
-            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-2xl">🤖</span>
-                <div>
-                  <p className="font-bold text-purple-800">Análisis Completo</p>
-                  <p className="text-xs text-purple-600">{selectedGallo?.nombre || 'Tu gallo'} · {MOMENTOS.find(m => m.value === momento)?.label}</p>
+
+            {/* Índice General */}
+            <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-5 text-white text-center shadow-lg">
+              <p className="text-sm font-medium opacity-75 mb-1">Índice General</p>
+              <div className="text-7xl font-black tracking-tight">{analysis.summary?.indice_general ?? '—'}</div>
+              <p className="text-xs opacity-60 mt-0.5">/100</p>
+              <p className="text-sm mt-2 opacity-90 font-medium">{selectedGallo?.nombre || 'Tu gallo'} · {MOMENTOS.find(m => m.value === momento)?.label}</p>
+              {analysis.training_metrics?.confianza_analisis > 0 && (
+                <p className="text-xs opacity-60 mt-1">Confianza: {analysis.training_metrics.confianza_analisis}%</p>
+              )}
+            </div>
+
+            {/* Métricas de entrenamiento */}
+            {analysis.training_metrics && (() => {
+              const metricas = [
+                ['Actividad', analysis.training_metrics.actividad_score],
+                ['Velocidad', analysis.training_metrics.velocidad_score],
+                ['Balance', analysis.training_metrics.balance_score],
+                ['Coordinación', analysis.training_metrics.coordinacion_score],
+                ['Simetría', analysis.training_metrics.simetria_score],
+                ['Movilidad', analysis.training_metrics.movilidad_score],
+                ['Recuperación', analysis.training_metrics.recuperacion_score],
+                ['Cond. Física', analysis.training_metrics.condicion_fisica_score],
+              ].filter(([, v]) => v !== null && v !== undefined);
+              return metricas.length > 0 ? (
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <p className="font-bold text-gray-800 mb-3 text-sm">📊 Métricas de Entrenamiento</p>
+                  <div className="space-y-2.5">
+                    {metricas.map(([label, val]) => (
+                      <div key={label}>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-600">{label}</span>
+                          <span className="font-bold text-gray-800">{val}/10</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${val >= 7 ? 'bg-green-500' : val >= 5 ? 'bg-yellow-400' : 'bg-red-400'}`}
+                            style={{width: (val * 10) + '%'}} />
+                        </div>
+                      </div>
+                    ))}
+                    {analysis.training_metrics.fatiga_score !== null && analysis.training_metrics.fatiga_score !== undefined && (
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-600">Fatiga <span className="text-gray-400 text-[10px]">(↑ = más fatigado)</span></span>
+                          <span className="font-bold text-gray-800">{analysis.training_metrics.fatiga_score}/10</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${analysis.training_metrics.fatiga_score <= 3 ? 'bg-green-500' : analysis.training_metrics.fatiga_score <= 6 ? 'bg-yellow-400' : 'bg-red-400'}`}
+                            style={{width: (analysis.training_metrics.fatiga_score * 10) + '%'}} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Rasgos del Gallo */}
+            {analysis.rooster_traits && (() => {
+              const traits = Object.entries(analysis.rooster_traits).filter(([, t]) => t.score !== null && t.score !== undefined);
+              return traits.length > 0 ? (
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <p className="font-bold text-gray-800 mb-3 text-sm">🐓 Rasgos del Gallo</p>
+                  <div className="space-y-2.5">
+                    {traits.map(([key, trait]) => (
+                      <div key={key}>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-600 capitalize">{key}</span>
+                          <span className="font-bold text-gray-800">{trait.score}/10 <span className="text-gray-400 font-normal">({trait.confianza}%)</span></span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${trait.score >= 7 ? 'bg-purple-500' : trait.score >= 5 ? 'bg-blue-400' : 'bg-gray-400'}`}
+                            style={{width: (trait.score * 10) + '%'}} />
+                        </div>
+                        {trait.evidencia && <p className="text-[10px] text-gray-400 mt-0.5 italic">{trait.evidencia}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Alertas */}
+            {analysis.alerts && analysis.alerts.length > 0 && (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                <p className="font-bold text-orange-800 mb-2 text-sm">⚠️ Alertas</p>
+                <div className="space-y-1">
+                  {analysis.alerts.map((a, i) => <p key={i} className="text-sm text-orange-700">• {a}</p>)}
                 </div>
               </div>
-              <div className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">{analysis}</div>
-            </div>
-            <div className="space-y-2">
-              <button onClick={() => { stopCamera(); onClose({ analysis, gallo: selectedGallo }); }}
+            )}
+
+            {/* Puntos fuertes / a observar */}
+            {analysis.training_metrics && (analysis.training_metrics.puntos_fuertes?.length > 0 || analysis.training_metrics.puntos_a_observar?.length > 0) && (
+              <div className="grid grid-cols-2 gap-3">
+                {analysis.training_metrics.puntos_fuertes?.length > 0 && (
+                  <div className="bg-green-50 border border-green-100 rounded-xl p-3">
+                    <p className="text-xs font-bold text-green-800 mb-1.5">✅ Fortalezas</p>
+                    {analysis.training_metrics.puntos_fuertes.map((p, i) => <p key={i} className="text-xs text-green-700 leading-snug">• {p}</p>)}
+                  </div>
+                )}
+                {analysis.training_metrics.puntos_a_observar?.length > 0 && (
+                  <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3">
+                    <p className="text-xs font-bold text-yellow-800 mb-1.5">👀 A Observar</p>
+                    {analysis.training_metrics.puntos_a_observar.map((p, i) => <p key={i} className="text-xs text-yellow-700 leading-snug">• {p}</p>)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Resumen */}
+            {analysis.summary?.resumen_general && (
+              <div className="bg-gray-50 rounded-xl p-4">
+                <p className="font-bold text-gray-700 mb-2 text-sm">📝 Resumen</p>
+                <p className="text-sm text-gray-700 leading-relaxed">{analysis.summary.resumen_general}</p>
+              </div>
+            )}
+
+            <div className="space-y-2 pb-2">
+              <button onClick={() => { stopCamera(); onClose({ analysis, gallo: selectedGallo, raw: rawText }); }}
                 className="w-full py-3 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700">
                 💾 Guardar en entrenamiento
               </button>
@@ -1239,7 +1349,8 @@ const EntrenamientosModule = () => {
     problemas_alas: 'No', condicion_pico: 'Normal', condicion_espuelas: 'Sanas',
     nutricion_items: [], desparasitante: '', medicinas_especiales: '', alimentacion_especial: '',
     desempeno_general: 'Bueno', velocidad: 'Normal', resistencia: 'Buena', razon_malo: '', observaciones: '',
-    fotos: []
+    fotos: [],
+    ai_training_metrics: null, ai_rooster_traits: null, ai_summary: null, ai_raw: null, ai_indice_general: null
   };
   const [form, setForm] = useState(emptyForm);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -1391,9 +1502,10 @@ const EntrenamientosModule = () => {
             <div key={e.id} className="bg-white rounded-lg border border-gray-200 p-3" onClick={() => setShowDetalle(e)}>
               <div className="flex items-center justify-between">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-medium text-sm text-gray-800">{e.gallos?.nombre || '#' + e.gallos?.numero_pinches}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                    {e.ai_indice_general != null && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-purple-100 text-purple-700">🤖 {e.ai_indice_general}</span>}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {e.fecha} • {e.peso_libras}lb {e.peso_onzas}oz
@@ -1448,6 +1560,24 @@ const EntrenamientosModule = () => {
               )}
               {e.razon_malo && <div className="border-t pt-2"><p className="text-gray-500">Razón malo: <span className="text-red-700">{e.razon_malo}</span></p></div>}
               {e.observaciones && <div className="border-t pt-2"><p className="text-gray-500">Observaciones: <span className="text-gray-800">{e.observaciones}</span></p></div>}
+              {e.ai_summary && (
+                <div className="border-t pt-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <p className="text-sm font-bold text-purple-700">🤖 Análisis IA</p>
+                    {e.ai_indice_general != null && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold">Índice: {e.ai_indice_general}/100</span>}
+                  </div>
+                  {e.ai_summary.resumen_general && <p className="text-xs text-gray-700 leading-relaxed">{e.ai_summary.resumen_general}</p>}
+                  {e.ai_training_metrics?.puntos_fuertes?.length > 0 && (
+                    <p className="text-xs text-green-700 mt-1.5">✅ {e.ai_training_metrics.puntos_fuertes.join(' · ')}</p>
+                  )}
+                  {e.ai_training_metrics?.puntos_a_observar?.length > 0 && (
+                    <p className="text-xs text-yellow-700 mt-0.5">👀 {e.ai_training_metrics.puntos_a_observar.join(' · ')}</p>
+                  )}
+                  {e.ai_summary.alerts?.length > 0 && (
+                    <p className="text-xs text-orange-700 mt-0.5">⚠️ {e.ai_summary.alerts.join(' · ')}</p>
+                  )}
+                </div>
+              )}
               {e.fotos && e.fotos.length > 0 && (
                 <div className="border-t pt-2">
                   <p className="text-gray-500 mb-2">Fotos:</p>
@@ -1564,12 +1694,18 @@ const EntrenamientosModule = () => {
             setShowVideoAnalysis(false);
             if (result && result.analysis) {
               const g = result.gallo;
+              const ai = result.analysis;
               setGalloSelected(g || null);
               setForm({
                 ...emptyForm,
                 gallo_id: g?.id || null,
                 fecha: new Date().toISOString().split('T')[0],
-                observaciones: '--- Analisis IA ---\n' + result.analysis
+                observaciones: ai.summary?.resumen_general ? '--- Análisis IA ---\n' + ai.summary.resumen_general : '',
+                ai_training_metrics: ai.training_metrics || null,
+                ai_rooster_traits: ai.rooster_traits || null,
+                ai_summary: ai.summary ? { ...ai.summary, alerts: ai.alerts || [] } : null,
+                ai_raw: result.raw || null,
+                ai_indice_general: ai.summary?.indice_general ?? null,
               });
               setEditingId(null);
               setShowForm(true);
@@ -2025,7 +2161,10 @@ const DashboardModule = () => {
                         <span className="text-xs font-medium">{e.peso_libras}lb {e.peso_onzas}oz</span>
                         {e.corrida && <span className="text-xs text-gray-400">{e.corrida}' corr</span>}{e.chata && <span className="text-xs text-blue-400 ml-1">{e.chata}' chat</span>}
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {e.ai_indice_general != null && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-purple-100 text-purple-700">🤖 {e.ai_indice_general}</span>}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2282,6 +2421,38 @@ const DashboardModule = () => {
                 </div>
               </div>
             )}
+
+            {/* Progresión IA */}
+            {selected.amarrado && (() => {
+              const withAI = entrenamientos.filter(e => e.ai_indice_general != null);
+              if (withAI.length === 0) return null;
+              const avg = Math.round(withAI.reduce((s, e) => s + e.ai_indice_general, 0) / withAI.length);
+              return (
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">🤖 Índice IA por Sesión</p>
+                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold">Prom: {avg}/100</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {withAI.slice(0, 5).map(e => (
+                      <div key={e.id} className="flex items-center gap-2 bg-purple-50 rounded-lg px-2.5 py-2">
+                        <span className="text-xs text-gray-500 w-20 flex-shrink-0">{e.fecha}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="h-2 bg-purple-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-purple-500 rounded-full" style={{width: e.ai_indice_general + '%'}} />
+                          </div>
+                          {e.ai_summary?.resumen_general && (
+                            <p className="text-[10px] text-gray-500 mt-0.5 truncate">{e.ai_summary.resumen_general}</p>
+                          )}
+                        </div>
+                        <span className="text-sm font-black text-purple-700 flex-shrink-0 w-8 text-right">{e.ai_indice_general}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {withAI.length > 5 && <p className="text-[10px] text-gray-400 mt-1 text-right">+{withAI.length - 5} sesiones más</p>}
+                </div>
+              );
+            })()}
           </div>
         </Modal>
       )}
@@ -2308,7 +2479,10 @@ const DashboardModule = () => {
                       </div>
                     )}
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded font-medium ml-2 ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                  <div className="flex flex-col items-end gap-1 ml-2 flex-shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${desempenoColor(e.desempeno_general)}`}>{e.desempeno_general}</span>
+                    {e.ai_indice_general != null && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-purple-100 text-purple-700">🤖 {e.ai_indice_general}</span>}
+                  </div>
                 </div>
               </div>
             ))}
@@ -2433,6 +2607,36 @@ const DashboardModule = () => {
                 <div className="border-t pt-2">
                   <p className="text-xs font-bold text-gray-700 mb-1 uppercase">Observaciones</p>
                   <p className="text-gray-700 bg-gray-50 p-2 rounded">{e.observaciones}</p>
+                </div>
+              )}
+
+              {/* Análisis IA */}
+              {e.ai_summary && (
+                <div className="border-t pt-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <p className="text-xs font-bold text-purple-700 uppercase">🤖 Análisis IA</p>
+                    {e.ai_indice_general != null && <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold text-xs">Índice: {e.ai_indice_general}/100</span>}
+                  </div>
+                  {e.ai_summary.resumen_general && <p className="text-xs text-gray-700 bg-purple-50 p-2 rounded leading-relaxed">{e.ai_summary.resumen_general}</p>}
+                  {(e.ai_training_metrics?.puntos_fuertes?.length > 0 || e.ai_training_metrics?.puntos_a_observar?.length > 0) && (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      {e.ai_training_metrics.puntos_fuertes?.length > 0 && (
+                        <div className="bg-green-50 rounded p-2">
+                          <p className="text-[10px] font-bold text-green-800 mb-0.5">✅ Fortalezas</p>
+                          {e.ai_training_metrics.puntos_fuertes.map((p, i) => <p key={i} className="text-[10px] text-green-700 leading-snug">• {p}</p>)}
+                        </div>
+                      )}
+                      {e.ai_training_metrics.puntos_a_observar?.length > 0 && (
+                        <div className="bg-yellow-50 rounded p-2">
+                          <p className="text-[10px] font-bold text-yellow-800 mb-0.5">👀 A Observar</p>
+                          {e.ai_training_metrics.puntos_a_observar.map((p, i) => <p key={i} className="text-[10px] text-yellow-700 leading-snug">• {p}</p>)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {e.ai_summary.alerts?.length > 0 && (
+                    <p className="text-xs text-orange-700 mt-1.5">⚠️ {e.ai_summary.alerts.join(' · ')}</p>
+                  )}
                 </div>
               )}
             </div>
