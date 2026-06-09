@@ -841,6 +841,300 @@ const GeneticaModule = () => {
 };
 
 // ============================================
+// COMPONENTE: Analisis de Video con IA
+// ============================================
+const VideoAnalysisModal = ({ gallo, onClose }) => {
+  const [step, setStep] = React.useState('setup');
+  const [momento, setMomento] = React.useState('inicio');
+  const [notas, setNotas] = React.useState('');
+  const [galloDesc, setGalloDesc] = React.useState(
+    gallo ? ((gallo.nombre || ('#' + gallo.numero_pinches)) + (gallo.color ? ', color ' + gallo.color : '')) : ''
+  );
+  const [mediaRecorder, setMediaRecorder] = React.useState(null);
+  const [videoBlob, setVideoBlob] = React.useState(null);
+  const [videoUrl, setVideoUrl] = React.useState(null);
+  const [recording, setRecording] = React.useState(false);
+  const [seconds, setSeconds] = React.useState(0);
+  const [analysis, setAnalysis] = React.useState('');
+  const [error, setError] = React.useState('');
+  const videoRef = React.useRef(null);
+  const streamRef = React.useRef(null);
+  const chunksRef = React.useRef([]);
+  const timerRef = React.useRef(null);
+  const fileInputRef = React.useRef(null);
+  const MAX_SECONDS = 90;
+
+  const stopCamera = () => {
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 18 * 1024 * 1024) {
+      setError('El video pesa ' + (file.size/1024/1024).toFixed(1) + 'MB. Maximo 18MB. Recorta o comprime el video.');
+      return;
+    }
+    setError('');
+    setVideoBlob(file);
+    setVideoUrl(URL.createObjectURL(file));
+    setSeconds(Math.round(file.size / 200000)); // estimado aproximado
+    setStep('preview');
+  };
+
+  React.useEffect(() => {
+    return () => { stopCamera(); if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  const startCamera = async () => {
+    setError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
+      setStep('recording');
+    } catch (e) {
+      setError('No se pudo acceder a la camara: ' + e.message);
+    }
+  };
+
+  const startRecording = () => {
+    if (!streamRef.current) return;
+    chunksRef.current = [];
+    const mr = new MediaRecorder(streamRef.current, { mimeType: 'video/webm;codecs=vp8' });
+    mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mr.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+      setVideoBlob(blob);
+      setVideoUrl(URL.createObjectURL(blob));
+      stopCamera();
+      setStep('preview');
+    };
+    mr.start(1000);
+    setMediaRecorder(mr);
+    setRecording(true);
+    setSeconds(0);
+    timerRef.current = setInterval(() => {
+      setSeconds(s => {
+        if (s + 1 >= MAX_SECONDS) { mr.state !== 'inactive' && mr.stop(); clearInterval(timerRef.current); setRecording(false); return s + 1; }
+        return s + 1;
+      });
+    }, 1000);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    if (timerRef.current) clearInterval(timerRef.current);
+    setRecording(false);
+  };
+
+  const retake = () => { setVideoBlob(null); setVideoUrl(null); setSeconds(0); setError(''); setStep('setup'); };
+
+  const analyzeVideo = async () => {
+    if (!videoBlob) return;
+    setStep('analyzing');
+    setError('');
+    try {
+      if (videoBlob.size > 18 * 1024 * 1024) {
+        setError('El video pesa ' + (videoBlob.size/1024/1024).toFixed(1) + 'MB, es muy grande. Graba menos de 60s.');
+        setStep('preview'); return;
+      }
+      const arrayBuffer = await videoBlob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      const base64 = btoa(binary);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(SUPABASE_URL + '/functions/v1/analyze-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({
+          videoBase64: base64, mimeType: 'video/webm',
+          galloDescripcion: galloDesc,
+          momentoEntrenamiento: momento,
+          notas: notas
+        })
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) { setError(result.error || 'Error al analizar'); setStep('preview'); return; }
+      setAnalysis(result.analysis);
+      setStep('result');
+    } catch (e) {
+      setError('Error: ' + e.message); setStep('preview');
+    }
+  };
+
+  const formatAnalysis = (text) =>
+    text.split('\n').map((line, i) => {
+      const html = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      return React.createElement('p', { key: i, className: 'mb-1.5 text-sm leading-relaxed', dangerouslySetInnerHTML: { __html: html } });
+    });
+
+  const MOMENTOS = [
+    { value: 'inicio', label: 'Inicio', icon: '🟢', desc: 'Gallo fresco' },
+    { value: 'medio',  label: 'Medio',  icon: '🟡', desc: '5-10 min' },
+    { value: 'final',  label: 'Final',  icon: '🔴', desc: '15+ min' },
+  ];
+
+  return (
+    React.createElement('div', { className: 'fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col' },
+      React.createElement('div', { className: 'bg-gray-900 text-white px-4 py-3 flex items-center justify-between flex-shrink-0' },
+        React.createElement('div', null,
+          React.createElement('h3', { className: 'font-bold' }, '🎥 Analisis IA'),
+          gallo && React.createElement('p', { className: 'text-xs text-gray-400' }, gallo.nombre || ('#' + gallo.numero_pinches))
+        ),
+        React.createElement('button', { onClick: () => { stopCamera(); onClose(); }, className: 'w-8 h-8 flex items-center justify-center rounded-full bg-gray-700 text-white' }, '✕')
+      ),
+      React.createElement('div', { className: 'flex-1 overflow-y-auto' },
+
+        step === 'setup' && React.createElement('div', { className: 'p-4 space-y-4' },
+          React.createElement('div', { className: 'bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800' },
+            React.createElement('p', { className: 'font-semibold mb-1' }, 'Configura antes de grabar'),
+            React.createElement('p', { className: 'text-xs' }, 'La IA usara esta info para identificar tu gallo correctamente.')
+          ),
+          React.createElement('div', null,
+            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-1' }, 'Como identificar tu gallo *'),
+            React.createElement('input', { type: 'text', value: galloDesc, onChange: e => setGalloDesc(e.target.value),
+              placeholder: 'ej: gallo colorado, el mas grande, espuelas largas',
+              className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500' }),
+            React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, 'Color, tamano u otro detalle que lo diferencie de la chata/muneco')
+          ),
+          React.createElement('div', null,
+            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-2' }, 'Momento del entrenamiento'),
+            React.createElement('div', { className: 'grid grid-cols-3 gap-2' },
+              MOMENTOS.map(m =>
+                React.createElement('button', { key: m.value, onClick: () => setMomento(m.value),
+                  className: 'p-2 rounded-lg border text-center transition ' + (momento === m.value ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white') },
+                  React.createElement('p', { className: 'text-sm' }, m.icon + ' ' + m.label),
+                  React.createElement('p', { className: 'text-xs text-gray-500' }, m.desc)
+                )
+              )
+            )
+          ),
+          React.createElement('div', null,
+            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-1' }, 'Notas (opcional)'),
+            React.createElement('textarea', { value: notas, onChange: e => setNotas(e.target.value), rows: 2,
+              placeholder: 'ej: lesion en pata derecha, primer dia de chata esta semana...',
+              className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500' })
+          ),
+          error && React.createElement('p', { className: 'text-red-600 text-sm bg-red-50 p-2 rounded' }, error),
+          React.createElement('input', {
+            ref: fileInputRef, type: 'file', accept: 'video/*', style: { display: 'none' },
+            onChange: handleFileUpload
+          }),
+          React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+            React.createElement('button', { onClick: () => fileInputRef.current?.click(), disabled: !galloDesc.trim(),
+              className: 'py-3 rounded-xl border-2 border-purple-300 text-purple-700 font-bold hover:bg-purple-50 disabled:opacity-40 disabled:cursor-not-allowed' },
+              '📂 Subir video'
+            ),
+            React.createElement('button', { onClick: startCamera, disabled: !galloDesc.trim(),
+              className: 'py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed' },
+              '📹 Grabar ahora'
+            )
+          )
+        ),
+
+        step === 'recording' && React.createElement('div', { className: 'relative bg-black', style: { minHeight: '70vh' } },
+          React.createElement('video', { ref: videoRef, autoPlay: true, muted: true, playsInline: true,
+            className: 'w-full object-cover', style: { maxHeight: '70vh' } }),
+          recording && React.createElement('div', { className: 'absolute top-3 left-0 right-0 flex justify-center' },
+            React.createElement('div', { className: 'bg-black bg-opacity-60 text-white px-3 py-1 rounded-full flex items-center gap-2' },
+              React.createElement('span', { className: 'w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block' }),
+              React.createElement('span', { className: 'font-mono font-bold' },
+                String(Math.floor(seconds/60)).padStart(2,'0') + ':' + String(seconds%60).padStart(2,'0')),
+              React.createElement('span', { className: 'text-xs text-gray-300' }, '/ ' + MAX_SECONDS + 's max')
+            )
+          ),
+          recording && React.createElement('div', { className: 'absolute bottom-24 left-4 right-4 bg-gray-700 rounded-full h-1.5' },
+            React.createElement('div', { className: 'bg-red-500 h-1.5 rounded-full transition-all', style: { width: ((seconds/MAX_SECONDS)*100) + '%' } })
+          ),
+          React.createElement('div', { className: 'absolute bottom-6 left-0 right-0 flex justify-center' },
+            !recording
+              ? React.createElement('button', { onClick: startRecording,
+                  className: 'w-16 h-16 rounded-full bg-red-600 border-4 border-white shadow-xl flex items-center justify-center' },
+                  React.createElement('span', { className: 'w-6 h-6 rounded-full bg-white' })
+                )
+              : React.createElement('button', { onClick: stopRecording,
+                  className: 'w-16 h-16 rounded-full bg-red-600 border-4 border-white shadow-xl flex items-center justify-center' },
+                  React.createElement('span', { className: 'w-5 h-5 rounded bg-white' })
+                )
+          ),
+          !recording && React.createElement('div', { className: 'absolute top-3 right-3' },
+            React.createElement('p', { className: 'text-white text-xs bg-black bg-opacity-50 px-2 py-1 rounded' }, 'Presiona para grabar')
+          )
+        ),
+
+        step === 'preview' && videoUrl && React.createElement('div', { className: 'p-4 space-y-4' },
+          React.createElement('video', { src: videoUrl, controls: true, playsInline: true,
+            className: 'w-full rounded-xl bg-black', style: { maxHeight: '55vh' } }),
+          React.createElement('div', { className: 'bg-gray-50 rounded-lg p-3 text-sm' },
+            React.createElement('p', { className: 'text-gray-600' },
+              '⏱ Duracion: ', React.createElement('strong', null, seconds + 's'),
+              ' · 📦 Tamano: ', React.createElement('strong', null, (videoBlob?.size/1024/1024).toFixed(1) + 'MB')
+            )
+          ),
+          error && React.createElement('p', { className: 'text-red-600 text-sm bg-red-50 p-3 rounded-lg' }, error),
+          React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+            React.createElement('button', { onClick: retake,
+              className: 'py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50' },
+              '🔄 Volver a grabar'),
+            React.createElement('button', { onClick: analyzeVideo,
+              className: 'py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700' },
+              '🤖 Analizar con IA')
+          )
+        ),
+
+        step === 'analyzing' && React.createElement('div', {
+          className: 'flex flex-col items-center justify-center p-8 space-y-5', style: { minHeight: '60vh' } },
+          React.createElement('div', { className: 'w-20 h-20 rounded-full bg-purple-100 flex items-center justify-center' },
+            React.createElement('span', { className: 'text-4xl animate-bounce' }, '🤖')
+          ),
+          React.createElement('div', { className: 'text-center' },
+            React.createElement('p', { className: 'font-bold text-gray-800 text-lg' }, 'Analizando el video...'),
+            React.createElement('p', { className: 'text-gray-500 text-sm mt-1' }, 'Gemini AI esta evaluando tecnica, velocidad y rendimiento')
+          ),
+          React.createElement('div', { className: 'flex gap-1.5' },
+            [0,1,2].map(i => React.createElement('div', { key: i,
+              className: 'w-2 h-2 rounded-full bg-purple-500 animate-bounce',
+              style: { animationDelay: (i*0.2) + 's' } }))
+          ),
+          React.createElement('p', { className: 'text-xs text-gray-400 text-center' }, 'Puede tomar 15-30 segundos...')
+        ),
+
+        step === 'result' && analysis && React.createElement('div', { className: 'p-4 space-y-4' },
+          React.createElement('div', { className: 'bg-purple-50 border border-purple-200 rounded-xl p-4' },
+            React.createElement('div', { className: 'flex items-center gap-2 mb-3' },
+              React.createElement('span', { className: 'text-2xl' }, '🤖'),
+              React.createElement('div', null,
+                React.createElement('p', { className: 'font-bold text-purple-800' }, 'Analisis Completo'),
+                React.createElement('p', { className: 'text-xs text-purple-600' },
+                  (gallo?.nombre || 'Tu gallo') + ' · ' + (MOMENTOS.find(m => m.value === momento)?.label || '')
+                )
+              )
+            ),
+            React.createElement('div', { className: 'text-gray-700 leading-relaxed' }, formatAnalysis(analysis))
+          ),
+          React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+            React.createElement('button', { onClick: retake,
+              className: 'py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 text-sm hover:bg-gray-50' },
+              '🎥 Nuevo video'),
+            React.createElement('button', { onClick: () => { stopCamera(); onClose(analysis); },
+              className: 'py-3 rounded-xl bg-purple-600 text-white font-bold text-sm hover:bg-purple-700' },
+              '✅ Cerrar')
+          )
+        )
+      )
+    )
+  );
+};
+
+// ============================================
 // MÓDULO: ENTRENAMIENTOS
 // ============================================
 const EntrenamientosModule = () => {
@@ -851,6 +1145,7 @@ const EntrenamientosModule = () => {
   const [galloFilter, setGalloFilter] = useState(null);
   const [showDetalle, setShowDetalle] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showVideoAnalysis, setShowVideoAnalysis] = useState(false);
 
   const nutricionOpts = opciones['nutricion'] || [];
   const [nuevaNut, setNuevaNut] = useState('');
@@ -977,10 +1272,16 @@ const EntrenamientosModule = () => {
           <h2 className="text-xl font-bold text-gray-800">Entrenamientos</h2>
           <p className="text-sm text-gray-500">{entrenamientos.length} registros</p>
         </div>
-        {canEdit && <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
-          className="bg-green-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-green-700">
-          + Nuevo
-        </button>}
+        <div className="flex gap-2">
+          <button onClick={() => setShowVideoAnalysis(true)}
+            className="bg-purple-600 text-white px-3 py-2.5 rounded-lg font-medium text-sm hover:bg-purple-700">
+            🎥 IA
+          </button>
+          {canEdit && <button onClick={() => { setForm(emptyForm); setEditingId(null); setGalloSelected(null); setShowForm(true); }}
+            className="bg-green-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-green-700">
+            + Nuevo
+          </button>}
+        </div>
       </div>
 
       {/* Filtro por gallo */}
@@ -1177,6 +1478,13 @@ const EntrenamientosModule = () => {
       )}
     </div>
   );
+
+      {showVideoAnalysis && (
+        <VideoAnalysisModal
+          gallo={galloFilter}
+          onClose={(analysisText) => setShowVideoAnalysis(false)}
+        />
+      )}
 };
 
 // ============================================
