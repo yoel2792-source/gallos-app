@@ -1503,8 +1503,6 @@ const EntrenamientosModule = () => {
           </div>
         </Modal>
       )}
-    </div>
-  );
 
       {showVideoAnalysis && (
         <VideoAnalysisModal
@@ -1512,7 +1510,6 @@ const EntrenamientosModule = () => {
           onClose={(result) => {
             setShowVideoAnalysis(false);
             if (result && result.analysis) {
-              // Pre-fill new entrenamiento form with the AI analysis
               const g = result.gallo;
               setGalloSelected(g || null);
               setForm({
@@ -1527,6 +1524,8 @@ const EntrenamientosModule = () => {
           }}
         />
       )}
+    </div>
+  );
 };
 
 // ============================================
