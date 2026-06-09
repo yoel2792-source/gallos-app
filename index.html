@@ -1195,80 +1195,68 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
               <div className="text-7xl font-black tracking-tight">{analysis.summary?.indice_general ?? '—'}</div>
               <p className="text-xs opacity-60 mt-0.5">/100</p>
               <p className="text-sm mt-2 opacity-90 font-medium">{selectedGallo?.nombre || 'Tu gallo'} · {MOMENTOS.find(m => m.value === momento)?.label}</p>
-              {analysis.training_metrics?.confianza_analisis > 0 && (
-                <p className="text-xs opacity-60 mt-1">Confianza: {analysis.training_metrics.confianza_analisis}%</p>
+              {(analysis.training_metrics?.confianza_analisis || 0) > 0 && (
+                <p className="text-xs opacity-60 mt-1">Confianza del análisis: {analysis.training_metrics.confianza_analisis}%</p>
               )}
             </div>
 
-            {/* Métricas de entrenamiento */}
-            {analysis.training_metrics && (() => {
-              const metricas = [
-                ['Actividad', analysis.training_metrics.actividad_score],
-                ['Velocidad', analysis.training_metrics.velocidad_score],
-                ['Balance', analysis.training_metrics.balance_score],
-                ['Coordinación', analysis.training_metrics.coordinacion_score],
-                ['Simetría', analysis.training_metrics.simetria_score],
-                ['Movilidad', analysis.training_metrics.movilidad_score],
-                ['Recuperación', analysis.training_metrics.recuperacion_score],
-                ['Cond. Física', analysis.training_metrics.condicion_fisica_score],
-              ].filter(([, v]) => v !== null && v !== undefined);
-              return metricas.length > 0 ? (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <p className="font-bold text-gray-800 mb-3 text-sm">📊 Métricas de Entrenamiento</p>
-                  <div className="space-y-2.5">
-                    {metricas.map(([label, val]) => (
-                      <div key={label}>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-gray-600">{label}</span>
-                          <span className="font-bold text-gray-800">{val}/10</span>
-                        </div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full transition-all ${val >= 7 ? 'bg-green-500' : val >= 5 ? 'bg-yellow-400' : 'bg-red-400'}`}
-                            style={{width: (val * 10) + '%'}} />
-                        </div>
+            {/* Métricas de entrenamiento — sin IIFEs */}
+            {analysis.training_metrics && (
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <p className="font-bold text-gray-800 mb-3 text-sm">📊 Métricas de Entrenamiento</p>
+                <div className="space-y-2">
+                  {[
+                    ['Actividad',    analysis.training_metrics.actividad_score],
+                    ['Velocidad',    analysis.training_metrics.velocidad_score],
+                    ['Balance',      analysis.training_metrics.balance_score],
+                    ['Coordinación', analysis.training_metrics.coordinacion_score],
+                    ['Simetría',     analysis.training_metrics.simetria_score],
+                    ['Movilidad',    analysis.training_metrics.movilidad_score],
+                    ['Recuperación', analysis.training_metrics.recuperacion_score],
+                    ['Cond. Física', analysis.training_metrics.condicion_fisica_score],
+                    ['Fatiga ↑',     analysis.training_metrics.fatiga_score],
+                  ].map(([lbl, val]) => val !== null && val !== undefined ? (
+                    <div key={lbl}>
+                      <div className="flex justify-between text-xs mb-0.5">
+                        <span className="text-gray-600">{lbl}</span>
+                        <span className="font-bold text-gray-800">{val}/10</span>
                       </div>
-                    ))}
-                    {analysis.training_metrics.fatiga_score !== null && analysis.training_metrics.fatiga_score !== undefined && (
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-gray-600">Fatiga <span className="text-gray-400 text-[10px]">(↑ = más fatigado)</span></span>
-                          <span className="font-bold text-gray-800">{analysis.training_metrics.fatiga_score}/10</span>
-                        </div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${analysis.training_metrics.fatiga_score <= 3 ? 'bg-green-500' : analysis.training_metrics.fatiga_score <= 6 ? 'bg-yellow-400' : 'bg-red-400'}`}
-                            style={{width: (analysis.training_metrics.fatiga_score * 10) + '%'}} />
-                        </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${val >= 7 ? 'bg-green-500' : val >= 5 ? 'bg-yellow-400' : 'bg-red-400'}`}
+                          style={{width: (val * 10) + '%'}} />
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  ) : null)}
                 </div>
-              ) : null;
-            })()}
+              </div>
+            )}
 
-            {/* Rasgos del Gallo */}
-            {analysis.rooster_traits && (() => {
-              const traits = Object.entries(analysis.rooster_traits).filter(([, t]) => t.score !== null && t.score !== undefined);
-              return traits.length > 0 ? (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <p className="font-bold text-gray-800 mb-3 text-sm">🐓 Rasgos del Gallo</p>
-                  <div className="space-y-2.5">
-                    {traits.map(([key, trait]) => (
-                      <div key={key}>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-gray-600 capitalize">{key}</span>
-                          <span className="font-bold text-gray-800">{trait.score}/10 <span className="text-gray-400 font-normal">({trait.confianza}%)</span></span>
-                        </div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${trait.score >= 7 ? 'bg-purple-500' : trait.score >= 5 ? 'bg-blue-400' : 'bg-gray-400'}`}
-                            style={{width: (trait.score * 10) + '%'}} />
-                        </div>
-                        {trait.evidencia && <p className="text-[10px] text-gray-400 mt-0.5 italic">{trait.evidencia}</p>}
+            {/* Rasgos del Gallo — sin IIFEs, siempre visible */}
+            {analysis.rooster_traits && (
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <p className="font-bold text-gray-800 mb-3 text-sm">🐓 Rasgos del Gallo</p>
+                <div className="space-y-2">
+                  {Object.entries(analysis.rooster_traits).map(([key, trait]) => trait.score !== null && trait.score !== undefined ? (
+                    <div key={key}>
+                      <div className="flex justify-between text-xs mb-0.5">
+                        <span className="text-gray-600 capitalize">{key}</span>
+                        <span className="font-bold text-gray-800">{trait.score}/10 <span className="text-gray-400 font-normal">({trait.confianza}%)</span></span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${trait.score >= 7 ? 'bg-purple-500' : trait.score >= 5 ? 'bg-blue-400' : 'bg-gray-400'}`}
+                          style={{width: (trait.score * 10) + '%'}} />
+                      </div>
+                      {trait.evidencia ? <p className="text-[10px] text-gray-400 italic mt-0.5">{trait.evidencia}</p> : null}
+                    </div>
+                  ) : (
+                    <div key={key} className="flex justify-between text-xs py-0.5 border-b border-gray-50">
+                      <span className="text-gray-400 capitalize">{key}</span>
+                      <span className="text-gray-300 text-[10px]">No observable</span>
+                    </div>
+                  ))}
                 </div>
-              ) : null;
-            })()}
+              </div>
+            )}
 
             {/* Alertas */}
             {analysis.alerts && analysis.alerts.length > 0 && (
@@ -1280,29 +1268,31 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
               </div>
             )}
 
-            {/* Puntos fuertes / a observar */}
-            {analysis.training_metrics && (analysis.training_metrics.puntos_fuertes?.length > 0 || analysis.training_metrics.puntos_a_observar?.length > 0) && (
+            {/* Fortalezas / A observar — siempre visible */}
+            {analysis.training_metrics && (
               <div className="grid grid-cols-2 gap-3">
-                {analysis.training_metrics.puntos_fuertes?.length > 0 && (
-                  <div className="bg-green-50 border border-green-100 rounded-xl p-3">
-                    <p className="text-xs font-bold text-green-800 mb-1.5">✅ Fortalezas</p>
-                    {analysis.training_metrics.puntos_fuertes.map((p, i) => <p key={i} className="text-xs text-green-700 leading-snug">• {p}</p>)}
-                  </div>
-                )}
-                {analysis.training_metrics.puntos_a_observar?.length > 0 && (
-                  <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3">
-                    <p className="text-xs font-bold text-yellow-800 mb-1.5">👀 A Observar</p>
-                    {analysis.training_metrics.puntos_a_observar.map((p, i) => <p key={i} className="text-xs text-yellow-700 leading-snug">• {p}</p>)}
-                  </div>
-                )}
+                <div className="bg-green-50 border border-green-100 rounded-xl p-3">
+                  <p className="text-xs font-bold text-green-800 mb-1.5">✅ Fortalezas</p>
+                  {(analysis.training_metrics.puntos_fuertes || []).length > 0
+                    ? (analysis.training_metrics.puntos_fuertes.map((p, i) => <p key={i} className="text-xs text-green-700 leading-snug">• {p}</p>))
+                    : <p className="text-[10px] text-green-400 italic">No detectadas</p>}
+                </div>
+                <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3">
+                  <p className="text-xs font-bold text-yellow-800 mb-1.5">👀 A Observar</p>
+                  {(analysis.training_metrics.puntos_a_observar || []).length > 0
+                    ? (analysis.training_metrics.puntos_a_observar.map((p, i) => <p key={i} className="text-xs text-yellow-700 leading-snug">• {p}</p>))
+                    : <p className="text-[10px] text-yellow-400 italic">Ninguno</p>}
+                </div>
               </div>
             )}
 
-            {/* Resumen */}
-            {analysis.summary?.resumen_general && (
+            {/* Resumen — siempre visible si existe summary */}
+            {analysis.summary && (
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="font-bold text-gray-700 mb-2 text-sm">📝 Resumen</p>
-                <p className="text-sm text-gray-700 leading-relaxed">{analysis.summary.resumen_general}</p>
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  {analysis.summary.resumen_general || 'Sin resumen generado.'}
+                </p>
               </div>
             )}
 
