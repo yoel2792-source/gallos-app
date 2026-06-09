@@ -844,9 +844,11 @@ const GeneticaModule = () => {
 // COMPONENTE: Analisis de Video con IA
 // ============================================
 const VideoAnalysisModal = ({ gallo, onClose }) => {
+  const { gallos } = useContext(AppContext);
   const [step, setStep] = React.useState('setup');
   const [momento, setMomento] = React.useState('inicio');
   const [notas, setNotas] = React.useState('');
+  const [selectedGallo, setSelectedGallo] = React.useState(gallo || null);
   const [galloDesc, setGalloDesc] = React.useState(
     gallo ? ((gallo.nombre || ('#' + gallo.numero_pinches)) + (gallo.color ? ', color ' + gallo.color : '')) : ''
   );
@@ -999,7 +1001,26 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
             React.createElement('p', { className: 'text-xs' }, 'La IA usara esta info para identificar tu gallo correctamente.')
           ),
           React.createElement('div', null,
-            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-1' }, 'Como identificar tu gallo *'),
+            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-2' }, 'Gallo a analizar'),
+            React.createElement('select', {
+              value: selectedGallo?.id || '',
+              onChange: e => {
+                const g = gallos.find(g => g.id === e.target.value) || null;
+                setSelectedGallo(g);
+                if (g) setGalloDesc((g.nombre || ('#' + g.numero_pinches)) + (g.color ? ', color ' + g.color : ''));
+              },
+              className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 mb-3'
+            },
+              React.createElement('option', { value: '' }, '-- Seleccionar gallo --'),
+              gallos.filter(g => g.amarrado).map(g =>
+                React.createElement('option', { key: g.id, value: g.id },
+                  (g.nombre || ('#' + g.numero_pinches)) + (g.color ? ' · ' + g.color : '')
+                )
+              )
+            )
+          ),
+          React.createElement('div', null,
+            React.createElement('label', { className: 'text-sm font-medium text-gray-700 block mb-1' }, 'Como identificar tu gallo (para la IA) *'),
             React.createElement('input', { type: 'text', value: galloDesc, onChange: e => setGalloDesc(e.target.value),
               placeholder: 'ej: gallo colorado, el mas grande, espuelas largas',
               className: 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500' }),
@@ -1120,13 +1141,19 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
             ),
             React.createElement('div', { className: 'text-gray-700 leading-relaxed' }, formatAnalysis(analysis))
           ),
-          React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-            React.createElement('button', { onClick: retake,
-              className: 'py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 text-sm hover:bg-gray-50' },
-              '🎥 Nuevo video'),
-            React.createElement('button', { onClick: () => { stopCamera(); onClose(analysis); },
-              className: 'py-3 rounded-xl bg-purple-600 text-white font-bold text-sm hover:bg-purple-700' },
-              '✅ Cerrar')
+          React.createElement('div', { className: 'space-y-2' },
+            React.createElement('button', {
+              onClick: () => { stopCamera(); onClose({ analysis, gallo: selectedGallo }); },
+              className: 'w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700'
+            }, '💾 Guardar en entrenamiento'),
+            React.createElement('div', { className: 'grid grid-cols-2 gap-2' },
+              React.createElement('button', { onClick: retake,
+                className: 'py-3 rounded-xl border border-gray-300 font-semibold text-gray-700 text-sm hover:bg-gray-50' },
+                '🎥 Nuevo video'),
+              React.createElement('button', { onClick: () => { stopCamera(); onClose(null); },
+                className: 'py-3 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50' },
+                '✕ Cerrar')
+            )
           )
         )
       )
@@ -1482,7 +1509,22 @@ const EntrenamientosModule = () => {
       {showVideoAnalysis && (
         <VideoAnalysisModal
           gallo={galloFilter}
-          onClose={(analysisText) => setShowVideoAnalysis(false)}
+          onClose={(result) => {
+            setShowVideoAnalysis(false);
+            if (result && result.analysis) {
+              // Pre-fill new entrenamiento form with the AI analysis
+              const g = result.gallo;
+              setGalloSelected(g || null);
+              setForm({
+                ...emptyForm,
+                gallo_id: g?.id || null,
+                fecha: new Date().toISOString().split('T')[0],
+                observaciones: '--- Analisis IA ---\n' + result.analysis
+              });
+              setEditingId(null);
+              setShowForm(true);
+            }
+          }}
         />
       )}
 };
