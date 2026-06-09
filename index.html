@@ -906,7 +906,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
   const startRecording = () => {
     if (!streamRef.current) return;
     chunksRef.current = [];
-    const mr = new MediaRecorder(streamRef.current, { mimeType: 'video/webm;codecs=vp8' });
+    const mr = new MediaRecorder(streamRef.current, { mimeType: 'video/webm;codecs=vp8', videoBitsPerSecond: 800000 });
     mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
     mr.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: 'video/webm' });
@@ -935,16 +935,56 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
 
   const retake = () => { setVideoBlob(null); setVideoUrl(null); setSeconds(0); setError(''); setStep('setup'); };
 
+  // Comprime el video usando canvas: redimensiona a 640px ancho, 600kbps, 15fps
+  const compressVideo = (blob) => new Promise((resolve, reject) => {
+    const vid = document.createElement('video');
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.playbackRate = 2; // 2x = comprime en la mitad del tiempo
+    const url = URL.createObjectURL(blob);
+    vid.src = url;
+    vid.onloadedmetadata = () => {
+      const scale = Math.min(1, 640 / Math.max(vid.videoWidth, 1));
+      const w = Math.round(vid.videoWidth * scale);
+      const h = Math.round(vid.videoHeight * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      const stream = canvas.captureStream(15);
+      const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8', videoBitsPerSecond: 600000 });
+      const chunks = [];
+      rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      rec.onstop = () => { URL.revokeObjectURL(url); resolve(new Blob(chunks, { type: 'video/webm' })); };
+      rec.start(500);
+      vid.play();
+      const draw = () => { if (!vid.ended && !vid.paused) { ctx.drawImage(vid, 0, 0, w, h); requestAnimationFrame(draw); } };
+      vid.onplay = () => requestAnimationFrame(draw);
+      vid.onended = () => rec.stop();
+      vid.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+    };
+    vid.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+  });
+
   const analyzeVideo = async () => {
     if (!videoBlob) return;
     setStep('analyzing');
     setError('');
     try {
-      if (videoBlob.size > 18 * 1024 * 1024) {
-        setError('Video muy grande. Graba menos de 60s.');
+      // Auto-comprimir si pesa más de 5MB
+      let blobToSend = videoBlob;
+      if (videoBlob.size > 5 * 1024 * 1024) {
+        try {
+          blobToSend = await compressVideo(videoBlob);
+        } catch (compErr) {
+          // Si falla la compresión, intentar con el original
+          blobToSend = videoBlob;
+        }
+      }
+      if (blobToSend.size > 18 * 1024 * 1024) {
+        setError('Video demasiado grande incluso después de comprimir. Intenta con un clip más corto (menos de 30s).');
         setStep('preview'); return;
       }
-      const arrayBuffer = await videoBlob.arrayBuffer();
+      const arrayBuffer = await blobToSend.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
       let binary = '';
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
@@ -1094,7 +1134,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
           <div className="p-4 space-y-4">
             <video src={videoUrl} controls playsInline className="w-full rounded-xl bg-black" style={{maxHeight:'55vh'}} />
             <div className="bg-gray-50 rounded-lg p-3 text-sm">
-              <p className="text-gray-600">📦 Tamaño: <strong>{videoBlob ? (videoBlob.size/1024/1024).toFixed(1) : '?'}MB</strong></p>
+              <p className="text-gray-600">📦 Tamaño: <strong>{videoBlob ? (videoBlob.size/1024/1024).toFixed(1) : '?'}MB</strong>{videoBlob && videoBlob.size > 5*1024*1024 ? <span className="text-blue-600 text-xs ml-1">(se comprimirá auto)</span> : null}</p>
             </div>
             {error && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-lg">{error}</p>}
             <div className="grid grid-cols-2 gap-3">
@@ -1112,7 +1152,7 @@ const VideoAnalysisModal = ({ gallo, onClose }) => {
             </div>
             <div className="text-center">
               <p className="font-bold text-gray-800 text-lg">Analizando el video...</p>
-              <p className="text-gray-500 text-sm mt-1">Gemini AI está evaluando técnica, velocidad y rendimiento</p>
+              <p className="text-gray-500 text-sm mt-1">Comprimiendo y enviando a Gemini AI...</p>
             </div>
             <div className="flex gap-1.5">
               {[0,1,2].map(i => <div key={i} className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{animationDelay: i*0.2+'s'}} />)}
