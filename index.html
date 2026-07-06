@@ -807,6 +807,38 @@ const ftLayoutFocus = (focusId, model) => {
 
 const ftInitials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 const ftTrunc = (s, n) => { s = s || ''; return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+// Parte un texto en varias líneas (máx `max` chars por línea, hasta `maxLines`)
+const ftWrap = (s, max, maxLines) => {
+  s = (s || '').trim();
+  if (!s) return [];
+  maxLines = maxLines || 3;
+  const words = s.split(/\s+/);
+  const lines = [];
+  let cur = '';
+  words.forEach(w => {
+    if (w.length > max) { // palabra muy larga: partir duro
+      if (cur) { lines.push(cur); cur = ''; }
+      for (let i = 0; i < w.length; i += max) lines.push(w.slice(i, i + max));
+      return;
+    }
+    if (!cur) cur = w;
+    else if ((cur + ' ' + w).length <= max) cur += ' ' + w;
+    else { lines.push(cur); cur = w; }
+  });
+  if (cur) lines.push(cur);
+  if (lines.length > maxLines) { const kept = lines.slice(0, maxLines); kept[maxLines - 1] = ftTrunc(kept[maxLines - 1] + ' ' + lines.slice(maxLines).join(' '), max); return kept; }
+  return lines;
+};
+// Devuelve las líneas de nombre + subtítulo (# pinche · año) para un nodo del árbol
+const ftNodeLabel = (g) => {
+  const nm = g.nombre;
+  const year = (g.fecha_nacimiento || '').slice(0, 4);
+  const nameLines = nm ? ftWrap(nm, 14, 2) : [g.numero_pinches ? '#' + g.numero_pinches : 'Sin nombre'];
+  const sub = [];
+  if (nm && g.numero_pinches) sub.push('#' + g.numero_pinches);
+  if (year) sub.push(year);
+  return { nameLines, sub: sub.join(' · ') };
+};
 
 const ArbolFamiliarModal = ({ gallos, cruces, initialFocusId, onClose }) => {
   const [mode, setMode] = useState(initialFocusId ? 'focus' : 'full');
@@ -851,8 +883,8 @@ const ArbolFamiliarModal = ({ gallos, cruces, initialFocusId, onClose }) => {
   const renderNode = (n, i) => {
     const g = byId.get(n.id); if (!g) return null;
     const color = colorFor(g);
-    const year = (g.fecha_nacimiento || '').slice(0, 4);
     const nm = nombreGallo(g);
+    const lbl = ftNodeLabel(g);
     const isFoco = mode === 'focus' && g.id === focoId;
     return (
       <g key={g.id + ':' + i} transform={`translate(${n.x},${n.y})`} style={{ cursor: 'pointer' }}
@@ -865,8 +897,10 @@ const ArbolFamiliarModal = ({ gallos, cruces, initialFocusId, onClose }) => {
         {!g.foto && <text textAnchor="middle" dy="5" fontSize="15" fontWeight="700" fill={color}>{ftInitials(nm)}</text>}
         <circle cx={FT_R * 0.72} cy={FT_R * 0.72} r="9" fill={g.sexo === 'Gallina' ? '#ec4899' : '#3b82f6'} stroke="#fff" strokeWidth="1.5" />
         <text x={FT_R * 0.72} y={FT_R * 0.72} textAnchor="middle" dy="3.5" fontSize="10" fill="#fff">{g.sexo === 'Gallina' ? '♀' : '♂'}</text>
-        <text textAnchor="middle" y={FT_R + 16} fontSize="12" fontWeight="700" fill="#1f2937">{ftTrunc(nm, 14)}</text>
-        {year && <text textAnchor="middle" y={FT_R + 30} fontSize="10" fill="#9ca3af">{year}</text>}
+        <text textAnchor="middle" y={FT_R + 16} fontSize="12" fontWeight="700" fill="#1f2937">
+          {lbl.nameLines.map((ln, li) => <tspan key={li} x="0" dy={li === 0 ? 0 : 13}>{ln}</tspan>)}
+        </text>
+        {lbl.sub && <text textAnchor="middle" y={FT_R + 16 + lbl.nameLines.length * 13} fontSize="10" fill="#9ca3af">{lbl.sub}</text>}
       </g>
     );
   };
@@ -1062,6 +1096,7 @@ const AnalisisCastaModal = ({ padre, madre, gallos, cruces, onClose }) => {
     const isCommon = !!commonColor[n.id];
     const ring = isCommon ? commonColor[n.id] : '#cbd5e1';
     const nm = nombreGallo(g);
+    const lbl = ftNodeLabel(g);
     return (
       <g key={n.id + ':' + i} transform={`translate(${n.x},${n.y})`}>
         {isCommon && <circle r={FT_R + 5} fill="none" stroke={ring} strokeWidth="2" opacity="0.35" />}
@@ -1070,7 +1105,10 @@ const AnalisisCastaModal = ({ padre, madre, gallos, cruces, onClose }) => {
         <circle cx={FT_R * 0.72} cy={FT_R * 0.72} r="8" fill={g.sexo === 'Gallina' ? '#ec4899' : '#3b82f6'} stroke="#fff" strokeWidth="1.5" />
         <text x={FT_R * 0.72} y={FT_R * 0.72} textAnchor="middle" dy="3" fontSize="9" fill="#fff">{g.sexo === 'Gallina' ? '♀' : '♂'}</text>
         {isCommon && <text x={-FT_R * 0.72} y={-FT_R * 0.72} textAnchor="middle" dy="4" fontSize="13" fill={ring}>★</text>}
-        <text textAnchor="middle" y={FT_R + 15} fontSize="11" fontWeight="600" fill="#1f2937">{ftTrunc(nm, 12)}</text>
+        <text textAnchor="middle" y={FT_R + 15} fontSize="11" fontWeight="600" fill="#1f2937">
+          {lbl.nameLines.map((ln, li) => <tspan key={li} x="0" dy={li === 0 ? 0 : 12}>{ln}</tspan>)}
+        </text>
+        {lbl.sub && <text textAnchor="middle" y={FT_R + 15 + lbl.nameLines.length * 12} fontSize="9" fill="#9ca3af">{lbl.sub}</text>}
       </g>
     );
   };
