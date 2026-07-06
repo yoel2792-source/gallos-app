@@ -19,6 +19,57 @@
       @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
       input, select, textarea { font-size: 16px !important; }
+
+      /* ===== ÁRBOL GENEALÓGICO HORIZONTAL ===== */
+      .htree { display: inline-flex; align-items: center; padding: 8px 4px; }
+      .htree-node { display: flex; align-items: center; }
+      .htree-sub {
+        margin-left: 26px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      /* línea horizontal desde la tarjeta padre hasta el eje vertical */
+      .htree-sub::before {
+        content: '';
+        position: absolute;
+        left: -26px;
+        top: 50%;
+        width: 26px;
+        border-top: 2px solid #cbd5e1;
+      }
+      .htree-child {
+        position: relative;
+        padding-left: 26px;
+        margin: 7px 0;
+        display: flex;
+        align-items: center;
+      }
+      /* eje vertical que une a los hijos (cada hijo dibuja su tramo) */
+      .htree-child::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        border-left: 2px solid #cbd5e1;
+      }
+      .htree-child:first-child::before { top: 50%; height: 50%; }
+      .htree-child:last-child::before  { top: 0;   height: 50%; }
+      .htree-child:only-child::before  { display: none; }
+      /* tramo horizontal que entra a cada hijo */
+      .htree-child::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        width: 26px;
+        border-top: 2px solid #cbd5e1;
+      }
+      .htree-scroll { overflow: auto; -webkit-overflow-scrolling: touch; }
+      .htree-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+      .htree-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -187,7 +238,7 @@ const MultiPhotoUpload = ({ values, onChange, label }) => {
 };
 
 // ============================================
-// COMPONENTE: Búsqueda de Gallo (reutilizable2)
+// COMPONENTE: Búsqueda de Gallo (reutilizable)
 // ============================================
 const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter }) => {
   const [q, setQ] = useState('');
@@ -400,6 +451,645 @@ const CaracteristicasCat = ({ seleccionadas, onToggle }) => {
       })}
       {leyendaAbierta && <LeyendaModal cat={leyendaAbierta} onClose={() => setLeyendaAbierta(null)} />}
     </div>
+  );
+};
+
+// ============================================
+// HELPERS COMPARTIDOS
+// ============================================
+const nombreGallo = (g) => {
+  if (!g) return 'Desconocido';
+  return g.nombre || (g.numero_pinches ? '#' + g.numero_pinches : 'Sin nombre');
+};
+const sexoIcon = (g) => (g && g.sexo === 'Gallina' ? '♀' : '♂');
+
+// ============================================
+// MOTOR HEURÍSTICO DE PREDICCIÓN DE CRÍA
+// Combina las características de padre, madre, abuelos y bisabuelos
+// con ponderación por generación (0.5^gen) y refuerzos de "Produce X".
+// ============================================
+const PRODUCE_BOOST = {
+  'Produce velocidad':    ['Rápido', 'Explosivo'],
+  'Produce inteligencia': ['Preciso', 'Lento pero certero', 'Constante', 'Calmado'],
+  'Produce resistencia':  ['Buen pulmón', 'Resistente', 'Se recupera rápido'],
+  'Produce fuerza':       ['Poderoso', 'Empuja', 'Pesado'],
+};
+
+// Recolecta el linaje de ambos padres con su peso genético por generación.
+const lineageSources = (padre, madre, gallos, maxGen = 3) => {
+  const out = [];
+  const seen = new Set();
+  const rec = (g, gen) => {
+    if (!g || gen > maxGen) return;
+    const w = Math.pow(0.5, gen - 1); // gen1 (padre/madre)=1, gen2=0.5, gen3=0.25
+    out.push({ g, w, gen });
+    // Evitar loops si hay datos circulares
+    const key = g.id + ':' + gen;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rec(gallos.find(x => x.id === g.padre_id), gen + 1);
+    rec(gallos.find(x => x.id === g.madre_id), gen + 1);
+  };
+  rec(padre, 1);
+  rec(madre, 1);
+  return out;
+};
+const GEN_LABEL = { 1: 'Padres', 2: 'Abuelos', 3: 'Bisabuelos' };
+
+const predecirCruce = (padre, madre, gallos) => {
+  const sources = lineageSources(padre, madre, gallos, 3);
+
+  // Refuerzos activos de "Produce X" presentes en el linaje
+  const boosts = {};
+  sources.forEach(({ g, w }) => (g.caracteristicas || []).forEach(c => {
+    if (PRODUCE_BOOST[c]) PRODUCE_BOOST[c].forEach(t => { boosts[t] = (boosts[t] || 0) + w * 0.35; });
+  }));
+
+  // Distribución por categoría/subgrupo (excluye la categoría de reproducción)
+  const categorias = CATS_CARACTERISTICAS.filter(c => c.id !== 'genetica').map(cat => {
+    const subs = cat.subs.map(sub => {
+      const weights = {};
+      const contrib = {};
+      sub.opts.forEach(o => { weights[o] = 0; contrib[o] = []; });
+      sources.forEach(({ g, w, gen }) => (g.caracteristicas || []).forEach(c => {
+        if (c in weights) {
+          weights[c] += w;
+          contrib[c].push({ nombre: nombreGallo(g), gen });
+        }
+      }));
+      // Aplicar refuerzos
+      Object.keys(weights).forEach(o => { if (boosts[o]) weights[o] += boosts[o]; });
+      const total = Object.values(weights).reduce((a, b) => a + b, 0);
+      const dist = sub.opts
+        .map(o => ({
+          trait: o,
+          pct: total > 0 ? Math.round((weights[o] / total) * 100) : 0,
+          contribuyentes: contrib[o],
+          desc: LEYENDA[o] || '',
+        }))
+        .filter(x => x.pct > 0)
+        .sort((a, b) => b.pct - a.pct);
+      return { label: sub.label, dist, hasData: total > 0 };
+    }).filter(s => s.hasData);
+    return { cat: cat.label, id: cat.id, color: cat.color, subs };
+  }).filter(c => c.subs.length > 0);
+
+  // Tendencias reproductivas (categoría genética): qué "produce" cada padre
+  const reproTraits = (CATS_CARACTERISTICAS.find(c => c.id === 'genetica')?.subs || [])
+    .flatMap(s => s.opts);
+  const repro = [];
+  reproTraits.forEach(t => {
+    const fuentes = sources.filter(s => (s.g.caracteristicas || []).includes(t));
+    if (fuentes.length > 0) {
+      repro.push({ trait: t, desc: LEYENDA[t] || '', fuentes: fuentes.map(f => ({ nombre: nombreGallo(f.g), gen: f.gen })) });
+    }
+  });
+
+  // Confianza: más linaje con datos = más confianza
+  let c = 8;
+  sources.forEach(s => { if (s.g && (s.g.caracteristicas || []).length) c += s.w * 17; });
+  const confianza = Math.min(95, Math.round(c));
+
+  const linajeInfo = {
+    padres: sources.filter(s => s.gen === 1).length,
+    abuelos: sources.filter(s => s.gen === 2).length,
+    bisabuelos: sources.filter(s => s.gen === 3).length,
+    conDatos: sources.filter(s => (s.g.caracteristicas || []).length).length,
+    total: sources.length,
+  };
+
+  return { categorias, repro, confianza, linajeInfo };
+};
+
+// ============================================
+// ÁRBOL GENEALÓGICO HORIZONTAL (expandible)
+// ============================================
+const rolAncestro = (gen, esHembra) => {
+  if (gen === 1) return esHembra ? 'Madre' : 'Padre';
+  if (gen === 2) return esHembra ? 'Abuela' : 'Abuelo';
+  if (gen === 3) return esHembra ? 'Bisabuela' : 'Bisabuelo';
+  if (gen === 4) return esHembra ? 'Tatarabuela' : 'Tatarabuelo';
+  return 'Ancestro';
+};
+
+const TreeCard = ({ g, rol, highlight, hasKids, open, onToggle, onSelect }) => (
+  <div className={`relative rounded-xl border-2 px-2.5 py-2 bg-white shadow-sm flex items-center gap-2 min-w-[132px] ${
+    highlight ? 'border-red-500 ring-2 ring-red-200' : g ? 'border-gray-200' : 'border-dashed border-gray-300 bg-gray-50'
+  }`}>
+    {g && g.foto
+      ? <img src={g.foto} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" alt="" />
+      : <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-shrink-0 ${g ? (g.sexo === 'Gallina' ? 'bg-pink-50 text-pink-500' : 'bg-blue-50 text-blue-500') : 'bg-gray-100 text-gray-300'}`}>{g ? sexoIcon(g) : '?'}</div>
+    }
+    <div className="min-w-0 flex-1" onClick={g && onSelect ? () => onSelect(g) : undefined} style={g && onSelect ? { cursor: 'pointer' } : undefined}>
+      {rol && <p className="text-[9px] uppercase tracking-wide text-gray-400 leading-none">{rol}</p>}
+      <p className={`text-[13px] font-bold leading-tight truncate ${g ? (highlight ? 'text-red-700' : 'text-gray-800') : 'text-gray-400 italic'}`}>
+        {g ? nombreGallo(g) : 'Desconocido'}
+      </p>
+      {g && (g.linea_genetica || g.color) && (
+        <p className="text-[10px] text-gray-500 truncate">{[g.linea_genetica, g.color].filter(Boolean).join(' • ')}</p>
+      )}
+    </div>
+    {hasKids && (
+      <button onClick={onToggle}
+        className="w-5 h-5 flex-shrink-0 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 text-[11px] flex items-center justify-center">
+        {open ? '−' : '+'}
+      </button>
+    )}
+  </div>
+);
+
+// Nodo hacia atrás (ancestros)
+const AncestorNode = ({ g, rol, gallos, gen, highlight, onSelect }) => {
+  const padre = g ? gallos.find(x => x.id === g.padre_id) : null;
+  const madre = g ? gallos.find(x => x.id === g.madre_id) : null;
+  const hasParents = !!(padre || madre);
+  const [open, setOpen] = useState(gen <= 2);
+  return (
+    <div className="htree-node">
+      <TreeCard g={g} rol={rol} highlight={highlight} hasKids={hasParents} open={open}
+        onToggle={() => setOpen(o => !o)} onSelect={onSelect} />
+      {hasParents && open && (
+        <div className="htree-sub">
+          <div className="htree-child">
+            <AncestorNode g={padre} rol={rolAncestro(gen + 1, false)} gallos={gallos} gen={gen + 1} onSelect={onSelect} />
+          </div>
+          <div className="htree-child">
+            <AncestorNode g={madre} rol={rolAncestro(gen + 1, true)} gallos={gallos} gen={gen + 1} onSelect={onSelect} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Nodo hacia adelante (descendientes)
+const DescendantNode = ({ g, rol, gallos, gen, highlight, onSelect }) => {
+  const hijos = gallos.filter(x => x.padre_id === g.id || x.madre_id === g.id);
+  const [open, setOpen] = useState(gen <= 2);
+  return (
+    <div className="htree-node">
+      <TreeCard g={g} rol={rol} highlight={highlight} hasKids={hijos.length > 0} open={open}
+        onToggle={() => setOpen(o => !o)} onSelect={onSelect} />
+      {hijos.length > 0 && open && (
+        <div className="htree-sub">
+          {hijos.map(h => (
+            <div className="htree-child" key={h.id}>
+              <DescendantNode g={h} rol={h.sexo === 'Gallina' ? 'Hija' : 'Hijo'} gallos={gallos} gen={gen + 1} onSelect={onSelect} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ArbolGenealogicoModal = ({ gallo, gallos, onClose, onSelect }) => {
+  const [modo, setModo] = useState('ancestros'); // 'ancestros' | 'descendientes'
+  const [zoom, setZoom] = useState(1);
+  const hijosCount = gallos.filter(x => x.padre_id === gallo.id || x.madre_id === gallo.id).length;
+
+  return (
+    <Modal title={`🌳 Árbol: ${nombreGallo(gallo)}`} onClose={onClose} wide>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="inline-flex rounded-lg bg-gray-100 p-0.5">
+          <button onClick={() => setModo('ancestros')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold ${modo === 'ancestros' ? 'bg-white shadow text-red-700' : 'text-gray-500'}`}>
+            ⬅ Ancestros
+          </button>
+          <button onClick={() => setModo('descendientes')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold ${modo === 'descendientes' ? 'bg-white shadow text-red-700' : 'text-gray-500'}`}>
+            Descendientes ➡ {hijosCount > 0 ? `(${hijosCount})` : ''}
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <span className="text-xs text-gray-400">Zoom</span>
+          <button onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">−</button>
+          <span className="text-xs text-gray-500 w-9 text-center">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom(z => Math.min(1.4, +(z + 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">+</button>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-gray-400 mb-2">
+        {modo === 'ancestros'
+          ? 'Toca − / + en cada tarjeta para expandir o colapsar las ramas. Desplázate para ver todo el linaje.'
+          : hijosCount === 0 ? 'Este gallo todavía no tiene descendientes registrados.' : 'Descendencia registrada. Toca − / + para expandir.'}
+      </p>
+
+      <div className="htree-scroll border border-gray-100 rounded-xl bg-gradient-to-br from-gray-50 to-white" style={{ maxHeight: '65vh' }}>
+        <div style={{ transform: `scale(${zoom})`, transformOrigin: 'left top', transition: 'transform 0.15s', width: 'max-content' }}>
+          <div className="htree">
+            {modo === 'ancestros'
+              ? <AncestorNode g={gallo} rol="★ Seleccionado" gallos={gallos} gen={1} highlight onSelect={onSelect} />
+              : <DescendantNode g={gallo} rol="★ Seleccionado" gallos={gallos} gen={1} highlight onSelect={onSelect} />
+            }
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 mt-3 text-[11px] text-gray-400">
+        <span className="flex items-center gap-1"><span className="text-blue-500">♂</span> Gallo</span>
+        <span className="flex items-center gap-1"><span className="text-pink-500">♀</span> Gallina</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-3 border-t-2 border-gray-300"></span> Línea de sangre</span>
+      </div>
+    </Modal>
+  );
+};
+
+// ============================================
+// MÓDULO: CASTADERO (Casta / Cruces)
+// ============================================
+const CATS_COLOR_HEX = { blue: '#2563eb', green: '#16a34a', red: '#dc2626', purple: '#9333ea' };
+
+const BarraTrait = ({ trait, pct, color, desc, contribuyentes }) => {
+  const [show, setShow] = useState(false);
+  const hex = CATS_COLOR_HEX[color] || '#dc2626';
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between text-xs mb-0.5">
+        <button onClick={() => setShow(s => !s)} className="text-left font-medium text-gray-700 flex items-center gap-1">
+          {trait}
+          {contribuyentes && contribuyentes.length > 0 && <span className="text-gray-300 text-[10px]">ⓘ</span>}
+        </button>
+        <span className="font-bold" style={{ color: hex }}>{pct}%</span>
+      </div>
+      <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: pct + '%', background: hex }} />
+      </div>
+      {show && (
+        <div className="mt-1 text-[11px] text-gray-500 bg-gray-50 rounded-lg p-2">
+          {desc && <p className="mb-1">{desc}</p>}
+          {contribuyentes && contribuyentes.length > 0 && (
+            <p><span className="text-gray-400">Viene de: </span>
+              {contribuyentes.map((c, i) => (
+                <span key={i} className="inline-block bg-white border border-gray-200 rounded px-1 mr-1 mb-0.5">
+                  {c.nombre} <span className="text-gray-300">({GEN_LABEL[c.gen] || 'linaje'})</span>
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PrediccionCard = ({ prediccion }) => {
+  if (!prediccion) return null;
+  const { categorias, repro, confianza, linajeInfo } = prediccion;
+  const confColor = confianza >= 66 ? 'text-green-600 bg-green-50' : confianza >= 40 ? 'text-yellow-700 bg-yellow-50' : 'text-orange-700 bg-orange-50';
+  return (
+    <div className="space-y-3">
+      <div className={`rounded-xl p-3 flex items-center justify-between ${confColor}`}>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide">Confianza de la predicción</p>
+          <p className="text-[11px] opacity-80">
+            Linaje con datos: {linajeInfo.conDatos} de {linajeInfo.total} ({linajeInfo.abuelos} abuelos, {linajeInfo.bisabuelos} bisabuelos)
+          </p>
+        </div>
+        <span className="text-2xl font-extrabold">{confianza}%</span>
+      </div>
+
+      {categorias.length === 0 && (
+        <p className="text-sm text-gray-400 text-center py-4">
+          No hay suficientes características registradas en el linaje para predecir. Añade características a los padres y abuelos.
+        </p>
+      )}
+
+      {categorias.map((cat, ci) => (
+        <div key={ci} className="border border-gray-100 rounded-xl overflow-hidden">
+          <div className="px-3 py-2 text-white text-sm font-semibold" style={{ background: CATS_COLOR_HEX[cat.color] || '#dc2626' }}>
+            {cat.cat}
+          </div>
+          <div className="p-3 space-y-3">
+            {cat.subs.map((sub, si) => (
+              <div key={si}>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1.5">{sub.label}</p>
+                {sub.dist.map((d, di) => (
+                  <BarraTrait key={di} trait={d.trait} pct={d.pct} color={cat.color} desc={d.desc} contribuyentes={d.contribuyentes} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {repro.length > 0 && (
+        <div className="border border-purple-100 rounded-xl overflow-hidden">
+          <div className="px-3 py-2 bg-purple-600 text-white text-sm font-semibold">🧬 Tendencias reproductivas del linaje</div>
+          <div className="p-3 flex flex-wrap gap-1.5">
+            {repro.map((r, i) => (
+              <span key={i} className="text-[11px] bg-purple-50 text-purple-700 rounded-lg px-2 py-1" title={r.desc}>
+                {r.trait} <span className="text-purple-300">· {r.fuentes.length}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[10px] text-gray-400 italic px-1">
+        Estimación basada en las características heredables del linaje (ponderadas por generación). No es garantía genética;
+        muchos rasgos de pelea son poligénicos y el ambiente/crianza también influye.
+      </p>
+    </div>
+  );
+};
+
+const CastaderoModule = () => {
+  const { gallos, loadGallos, toast, activeOwnerId, canEdit } = useContext(AppContext);
+  const [padre, setPadre] = useState(null);
+  const [madre, setMadre] = useState(null);
+  const [cruces, setCruces] = useState([]);
+  const [showGuardar, setShowGuardar] = useState(false);
+  const [detalle, setDetalle] = useState(null);
+  const [arbolGallo, setArbolGallo] = useState(null);
+  const [fechaCruce, setFechaCruce] = useState(new Date().toISOString().slice(0, 10));
+  const [notas, setNotas] = useState('');
+
+  const loadCruces = useCallback(async () => {
+    const { data } = await supabase.from('cruces').select('*').eq('user_id', activeOwnerId).order('fecha_cruce', { ascending: false });
+    setCruces(data || []);
+  }, [activeOwnerId]);
+  useEffect(() => { loadCruces(); }, [loadCruces]);
+
+  const prediccion = useMemo(() => (padre && madre) ? predecirCruce(padre, madre, gallos) : null, [padre, madre, gallos]);
+
+  const guardarCruce = async () => {
+    const { error } = await supabase.from('cruces').insert({
+      user_id: activeOwnerId,
+      padre_id: padre.id,
+      madre_id: madre.id,
+      fecha_cruce: fechaCruce,
+      estado: 'Activo',
+      notas: notas || null,
+      prediccion: prediccion || null,
+    });
+    if (error) { toast('Error al guardar: ' + error.message, 'error'); return; }
+    toast('Casta guardada ✓');
+    setShowGuardar(false); setNotas('');
+    setPadre(null); setMadre(null);
+    loadCruces();
+  };
+
+  return (
+    <div className="fade-in">
+      <div className="mb-4">
+        <h2 className="text-xl font-bold text-gray-800">Castadero</h2>
+        <p className="text-sm text-gray-500">Cruza un gallo con una gallina y estima la cría</p>
+      </div>
+
+      {/* Selección de la pareja */}
+      <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4">
+        <div className="grid grid-cols-1 gap-3">
+          <div>
+            <p className="text-xs font-semibold text-blue-600 mb-1">♂ Gallo (padre)</p>
+            <GalloSearch gallos={gallos} selected={padre} onSelect={setPadre} onClear={() => setPadre(null)}
+              placeholder="Buscar gallo..." filter={g => g.sexo !== 'Gallina'} />
+          </div>
+          <div className="text-center text-gray-300 text-xl leading-none">✕</div>
+          <div>
+            <p className="text-xs font-semibold text-pink-600 mb-1">♀ Gallina (madre)</p>
+            <GalloSearch gallos={gallos} selected={madre} onSelect={setMadre} onClear={() => setMadre(null)}
+              placeholder="Buscar gallina..." filter={g => g.sexo === 'Gallina'} />
+          </div>
+        </div>
+      </div>
+
+      {/* Predicción */}
+      {padre && madre ? (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-bold text-gray-700">🔮 Predicción de la cría</h3>
+            {canEdit && (
+              <button onClick={() => setShowGuardar(true)}
+                className="bg-red-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-red-700">
+                + Guardar esta casta
+              </button>
+            )}
+          </div>
+          <PrediccionCard prediccion={prediccion} />
+        </>
+      ) : (
+        <div className="text-center text-gray-400 py-8 text-sm">
+          Selecciona un gallo y una gallina para ver los porcentajes estimados de la cría.
+        </div>
+      )}
+
+      {/* Historial de castas */}
+      <div className="mt-8">
+        <h3 className="text-sm font-bold text-gray-700 mb-2">📋 Castas registradas ({cruces.length})</h3>
+        {cruces.length === 0 ? (
+          <p className="text-center text-gray-400 py-6 text-sm">Todavía no has guardado ninguna casta.</p>
+        ) : (
+          <div className="space-y-2">
+            {cruces.map(c => {
+              const p = gallos.find(g => g.id === c.padre_id);
+              const m = gallos.find(g => g.id === c.madre_id);
+              const pollos = gallos.filter(g => g.cruce_id === c.id);
+              const estadoColor = {
+                Activo: 'bg-blue-100 text-blue-700', Empollando: 'bg-yellow-100 text-yellow-700',
+                Eclosionado: 'bg-green-100 text-green-700', Fallido: 'bg-red-100 text-red-700', Cerrado: 'bg-gray-100 text-gray-600',
+              }[c.estado] || 'bg-gray-100 text-gray-600';
+              return (
+                <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-3 active:bg-gray-50 cursor-pointer" onClick={() => setDetalle(c)}>
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-800 truncate">
+                        <span className="text-blue-600">♂ {nombreGallo(p)}</span>
+                        <span className="text-gray-300"> × </span>
+                        <span className="text-pink-600">♀ {nombreGallo(m)}</span>
+                      </p>
+                      <p className="text-[11px] text-gray-500">{c.fecha_cruce}{c.numero_huevos ? ` • ${c.numero_huevos} huevos` : ''}{pollos.length ? ` • ${pollos.length} pinches` : ''}</p>
+                    </div>
+                    <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${estadoColor}`}>{c.estado}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Modal guardar casta */}
+      {showGuardar && (
+        <Modal title="Guardar casta" onClose={() => setShowGuardar(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              <span className="text-blue-600 font-semibold">♂ {nombreGallo(padre)}</span> × <span className="text-pink-600 font-semibold">♀ {nombreGallo(madre)}</span>
+            </p>
+            <Field label="Fecha en que le echaste el gallo">
+              <Input type="date" value={fechaCruce} onChange={e => setFechaCruce(e.target.value)} />
+            </Field>
+            <Field label="Notas (opcional)">
+              <Textarea value={notas} onChange={e => setNotas(e.target.value)} placeholder="Corral, jaula, observaciones..." />
+            </Field>
+            <button onClick={guardarCruce} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700">
+              Guardar casta
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal detalle de casta */}
+      {detalle && (
+        <DetalleCastaModal
+          cruce={detalle}
+          gallos={gallos}
+          onClose={() => setDetalle(null)}
+          onReload={() => { loadCruces(); loadGallos(); }}
+          onVerArbol={g => setArbolGallo(g)}
+          canEdit={canEdit}
+          toast={toast}
+          activeOwnerId={activeOwnerId}
+        />
+      )}
+
+      {arbolGallo && <ArbolGenealogicoModal gallo={arbolGallo} gallos={gallos} onClose={() => setArbolGallo(null)} />}
+    </div>
+  );
+};
+
+// Detalle de una casta: resultados (huevos/eclosión) + registro de pinches
+const DetalleCastaModal = ({ cruce, gallos, onClose, onReload, onVerArbol, canEdit, toast, activeOwnerId }) => {
+  const p = gallos.find(g => g.id === cruce.padre_id);
+  const m = gallos.find(g => g.id === cruce.madre_id);
+  const pollos = gallos.filter(g => g.cruce_id === cruce.id);
+
+  const [form, setForm] = useState({
+    estado: cruce.estado || 'Activo',
+    numero_huevos: cruce.numero_huevos ?? '',
+    huevos_eclosionados: cruce.huevos_eclosionados ?? '',
+    num_pollos: cruce.num_pollos ?? '',
+    num_machos: cruce.num_machos ?? '',
+    num_hembras: cruce.num_hembras ?? '',
+    notas: cruce.notas || '',
+  });
+  const [showPinche, setShowPinche] = useState(false);
+  const [pinche, setPinche] = useState({ nombre: '', numero_pinches: '', sexo: 'Gallo', color: '' });
+
+  const guardarResultados = async () => {
+    const num = (v) => (v === '' || v === null ? null : parseInt(v, 10));
+    const { error } = await supabase.from('cruces').update({
+      estado: form.estado,
+      numero_huevos: num(form.numero_huevos),
+      huevos_eclosionados: num(form.huevos_eclosionados),
+      num_pollos: num(form.num_pollos),
+      num_machos: num(form.num_machos),
+      num_hembras: num(form.num_hembras),
+      notas: form.notas || null,
+    }).eq('id', cruce.id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    toast('Resultados guardados ✓');
+    onReload();
+    onClose();
+  };
+
+  const agregarPinche = async () => {
+    if (!pinche.nombre.trim() && !pinche.numero_pinches) { toast('Pon nombre o # de pinches', 'error'); return; }
+    const { error } = await supabase.from('gallos').insert({
+      user_id: activeOwnerId,
+      nombre: pinche.nombre.trim() || null,
+      numero_pinches: pinche.numero_pinches ? parseInt(pinche.numero_pinches, 10) : null,
+      sexo: pinche.sexo,
+      color: pinche.color || null,
+      linea_genetica: p?.linea_genetica || m?.linea_genetica || null,
+      padre_id: cruce.padre_id,
+      madre_id: cruce.madre_id,
+      cruce_id: cruce.id,
+    });
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    toast('Pinche añadido ✓');
+    setPinche({ nombre: '', numero_pinches: '', sexo: 'Gallo', color: '' });
+    setShowPinche(false);
+    onReload();
+  };
+
+  return (
+    <Modal title={`Casta: ${nombreGallo(p)} × ${nombreGallo(m)}`} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="bg-gray-50 rounded-xl p-3 text-sm">
+          <span className="text-blue-600 font-semibold">♂ {nombreGallo(p)}</span>
+          <span className="text-gray-300"> × </span>
+          <span className="text-pink-600 font-semibold">♀ {nombreGallo(m)}</span>
+          <span className="text-gray-400 text-xs"> · {cruce.fecha_cruce}</span>
+        </div>
+
+        {/* Resultados */}
+        <div>
+          <p className="text-xs font-bold text-gray-500 uppercase mb-2">Resultados de la casta</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Estado">
+              <Select value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value })}
+                options={['Activo', 'Empollando', 'Eclosionado', 'Fallido', 'Cerrado']} />
+            </Field>
+            <Field label="# Huevos">
+              <Input type="number" value={form.numero_huevos} onChange={e => setForm({ ...form, numero_huevos: e.target.value })} placeholder="ej: 12" />
+            </Field>
+            <Field label="Huevos eclosionados">
+              <Input type="number" value={form.huevos_eclosionados} onChange={e => setForm({ ...form, huevos_eclosionados: e.target.value })} placeholder="ej: 9" />
+            </Field>
+            <Field label="Pollos vivos">
+              <Input type="number" value={form.num_pollos} onChange={e => setForm({ ...form, num_pollos: e.target.value })} placeholder="ej: 8" />
+            </Field>
+            <Field label="Machos">
+              <Input type="number" value={form.num_machos} onChange={e => setForm({ ...form, num_machos: e.target.value })} />
+            </Field>
+            <Field label="Hembras">
+              <Input type="number" value={form.num_hembras} onChange={e => setForm({ ...form, num_hembras: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Notas">
+            <Textarea value={form.notas} onChange={e => setForm({ ...form, notas: e.target.value })} />
+          </Field>
+          {canEdit && (
+            <button onClick={guardarResultados} className="w-full bg-red-600 text-white py-2.5 rounded-lg font-semibold hover:bg-red-700 mt-1">
+              Guardar resultados
+            </button>
+          )}
+        </div>
+
+        {/* Pinches enlazados */}
+        <div className="border-t border-gray-100 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-gray-500 uppercase">Pinches de esta casta ({pollos.length})</p>
+            {canEdit && (
+              <button onClick={() => setShowPinche(s => !s)} className="text-xs font-semibold text-red-600">
+                {showPinche ? 'Cancelar' : '+ Añadir pinche'}
+              </button>
+            )}
+          </div>
+
+          {showPinche && (
+            <div className="bg-gray-50 rounded-xl p-3 mb-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Nombre"><Input value={pinche.nombre} onChange={e => setPinche({ ...pinche, nombre: e.target.value })} placeholder="ej: Pinto" /></Field>
+                <Field label="# Pinches"><Input type="number" value={pinche.numero_pinches} onChange={e => setPinche({ ...pinche, numero_pinches: e.target.value })} /></Field>
+                <Field label="Sexo"><Select value={pinche.sexo} onChange={e => setPinche({ ...pinche, sexo: e.target.value })} options={['Gallo', 'Gallina']} /></Field>
+                <Field label="Color"><Input value={pinche.color} onChange={e => setPinche({ ...pinche, color: e.target.value })} placeholder="ej: Giro" /></Field>
+              </div>
+              <p className="text-[11px] text-gray-400">Se creará como gallo con padre <b>{nombreGallo(p)}</b> y madre <b>{nombreGallo(m)}</b>, para seguir su genética.</p>
+              <button onClick={agregarPinche} className="w-full bg-gray-800 text-white py-2 rounded-lg font-semibold text-sm">Crear pinche</button>
+            </div>
+          )}
+
+          {pollos.length === 0 ? (
+            <p className="text-center text-gray-400 py-3 text-sm">Aún no hay pinches registrados en esta casta.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {pollos.map(g => (
+                <div key={g.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={g.sexo === 'Gallina' ? 'text-pink-500' : 'text-blue-500'}>{sexoIcon(g)}</span>
+                    <span className="text-sm font-medium text-gray-800 truncate">{nombreGallo(g)}</span>
+                    {g.color && <span className="text-[11px] text-gray-400">{g.color}</span>}
+                  </div>
+                  <button onClick={() => onVerArbol(g)} className="text-lg" title="Ver árbol">🌳</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 };
 
@@ -730,7 +1420,7 @@ const GeneticaModule = () => {
       </div>
 
       {/* Modal Árbol */}
-      {showArbol && <ArbolModal gallo={showArbol} />}
+      {showArbol && <ArbolGenealogicoModal gallo={showArbol} gallos={gallos} onClose={() => setShowArbol(null)} />}
       <PhotoViewer src={viewingPhoto} onClose={() => setViewingPhoto(null)} />
 
       {/* Modal Formulario */}
@@ -3301,6 +3991,7 @@ const App = ({ user }) => {
   const TABS = [
     { id: 'dashboard', label: '📊 Dashboard' },
     { id: 'gallos', label: '🐓 Gallos' },
+    { id: 'castadero', label: '🧬 Castadero' },
     { id: 'entrenamientos', label: '🏋️ Entrenamientos' },
     { id: 'peleas', label: '⚔️ Peleas' },
   ];
@@ -3333,6 +4024,7 @@ const App = ({ user }) => {
 
         <div className="px-4 py-4 max-w-2xl mx-auto">
           {tab === 'gallos' && <GeneticaModule />}
+          {tab === 'castadero' && <CastaderoModule />}
           {tab === 'entrenamientos' && <EntrenamientosModule />}
           {tab === 'peleas' && <PeleasModule />}
           {tab === 'dashboard' && <DashboardModule />}
