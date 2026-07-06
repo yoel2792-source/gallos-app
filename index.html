@@ -945,6 +945,202 @@ const ArbolFamiliarModal = ({ gallos, cruces, initialFocusId, onClose }) => {
 };
 
 // ============================================
+// ANÁLISIS DE CONSANGUINIDAD (line breeding, notación N×M)
+// ============================================
+const COMMON_PALETTE = ['#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777', '#ca8a04', '#4f46e5', '#0d9488'];
+
+const ftCollectAnc = (startId, model, maxGen) => {
+  const map = new Map();
+  const rec = (id, gen) => {
+    if (!id || gen > maxGen || !model.has(id)) return;
+    if (!map.has(id)) map.set(id, []);
+    map.get(id).push(gen);
+    const g = model.byId.get(id);
+    rec(g.padre_id, gen + 1);
+    rec(g.madre_id, gen + 1);
+  };
+  rec(startId, 1);
+  return map;
+};
+
+// Devuelve ancestros en común con notación N×M y coeficiente de Wright (F)
+const analizarConsanguinidad = (padre, madre, gallos, cruces, maxGen) => {
+  maxGen = maxGen || 6;
+  if (!padre || !madre) return { commons: [], F: 0 };
+  const model = ftBuildModel(gallos, cruces || []);
+  const A = ftCollectAnc(padre.id, model, maxGen);
+  const B = ftCollectAnc(madre.id, model, maxGen);
+  const commons = [];
+  let F = 0;
+  for (const [id, gensA] of A) {
+    if (!B.has(id)) continue;
+    const gensB = B.get(id);
+    const combos = {};
+    gensA.forEach(ga => gensB.forEach(gb => {
+      F += Math.pow(0.5, ga + gb - 1);
+      const k = ga + '×' + gb;
+      combos[k] = (combos[k] || 0) + 1;
+    }));
+    commons.push({
+      id, gallo: model.byId.get(id),
+      combos: Object.keys(combos).sort((a, b) => {
+        const pa = a.split('×').map(Number), pb = b.split('×').map(Number);
+        return (pa[0] + pa[1]) - (pb[0] + pb[1]);
+      }).map(k => ({ nota: k, veces: combos[k] })),
+      closest: Math.min.apply(null, gensA) + Math.min.apply(null, gensB),
+    });
+  }
+  commons.sort((a, b) => a.closest - b.closest);
+  return { commons, F };
+};
+
+const interpretarF = (F) => {
+  const p = F * 100;
+  if (p <= 0.001) return { txt: 'Sin parentesco detectado', cls: 'text-green-700 bg-green-50', hint: 'Cruce abierto (outcross).' };
+  if (p < 6.25) return { txt: 'Consanguinidad leve', cls: 'text-green-700 bg-green-50', hint: 'Parentesco lejano.' };
+  if (p < 12.5) return { txt: 'Line breeding moderado', cls: 'text-yellow-700 bg-yellow-50', hint: 'Refuerza tipo; riesgo bajo-medio.' };
+  if (p < 25) return { txt: 'Line breeding cerrado', cls: 'text-orange-700 bg-orange-50', hint: 'Fija características; vigila vigor.' };
+  return { txt: 'Consanguinidad muy alta', cls: 'text-red-700 bg-red-50', hint: 'Riesgo de merma (inbreeding depression).' };
+};
+
+// Layout pedigree hacia arriba (para el comparador)
+const ftAncestorLayout = (rootId, model, maxGen) => {
+  const nodes = [{ id: rootId, x: 0, y: 0, gen: 1 }];
+  const links = [];
+  const up = (id, gen, x, span) => {
+    if (gen > maxGen) return;
+    const g = model.byId.get(id); if (!g) return;
+    const p = model.has(g.padre_id) ? g.padre_id : null;
+    const m = model.has(g.madre_id) ? g.madre_id : null;
+    const y = -gen * FT_GENV, childY = -(gen - 1) * FT_GENV, half = span / 2;
+    if (p) { const px = x - half / 2; nodes.push({ id: p, x: px, y, gen: gen + 1 }); links.push({ x1: x, y1: childY - FT_R, x2: px, y2: y + FT_R }); up(p, gen + 1, px, half); }
+    if (m) { const mx = x + half / 2; nodes.push({ id: m, x: mx, y, gen: gen + 1 }); links.push({ x1: x, y1: childY - FT_R, x2: mx, y2: y + FT_R }); up(m, gen + 1, mx, half); }
+  };
+  up(rootId, 1, 0, FT_SLOT * Math.pow(2, Math.min(maxGen - 1, 3)));
+  return { nodes, links };
+};
+
+const AnalisisCastaModal = ({ padre, madre, gallos, cruces, onClose }) => {
+  const [zoom, setZoom] = useState(0.7);
+  const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
+  const model = useMemo(() => ftBuildModel(gallos, cruces || []), [gallos, cruces]);
+  const analisis = useMemo(() => analizarConsanguinidad(padre, madre, gallos, cruces, 6), [padre, madre, gallos, cruces]);
+  const info = interpretarF(analisis.F);
+  const commonColor = useMemo(() => {
+    const map = {}; analisis.commons.forEach((c, i) => { map[c.id] = COMMON_PALETTE[i % COMMON_PALETTE.length]; }); return map;
+  }, [analisis]);
+
+  const MAXG = 4;
+  const lay = useMemo(() => {
+    const p = ftAncestorLayout(padre.id, model, MAXG);
+    const m = ftAncestorLayout(madre.id, model, MAXG);
+    const pxs = p.nodes.map(n => n.x), mxs = m.nodes.map(n => n.x);
+    const pMin = Math.min.apply(null, pxs), pMax = Math.max.apply(null, pxs);
+    const mMin = Math.min.apply(null, mxs);
+    const GAP = FT_SLOT * 1.4;
+    const pOff = -pMin;
+    const mOff = (pMax - pMin) + GAP - mMin;
+    const shift = (arr, off) => arr.map(n => ({ ...n, x: n.x + off }));
+    const shiftL = (arr, off) => arr.map(l => ({ ...l, x1: l.x1 + off, x2: l.x2 + off }));
+    return {
+      nodes: shift(p.nodes, pOff).concat(shift(m.nodes, mOff)),
+      links: shiftL(p.links, pOff).concat(shiftL(m.links, mOff)),
+      padreX: 0 + pOff, madreX: mOff, pRightMid: (pOff + pMax + pOff) / 2,
+    };
+  }, [padre, madre, model]);
+
+  const pad = 80;
+  const box = useMemo(() => {
+    const xs = lay.nodes.map(n => n.x), ys = lay.nodes.map(n => n.y);
+    const minX = Math.min.apply(null, xs) - pad, maxX = Math.max.apply(null, xs) + pad;
+    const minY = Math.min.apply(null, ys) - pad - 24, maxY = Math.max.apply(null, ys) + pad;
+    return { minX, minY, W: Math.max(1, maxX - minX), H: Math.max(1, maxY - minY) };
+  }, [lay]);
+
+  const nodeEl = (n, i) => {
+    const g = byId.get(n.id); if (!g) return null;
+    const isCommon = !!commonColor[n.id];
+    const ring = isCommon ? commonColor[n.id] : '#cbd5e1';
+    const nm = nombreGallo(g);
+    return (
+      <g key={n.id + ':' + i} transform={`translate(${n.x},${n.y})`}>
+        {isCommon && <circle r={FT_R + 5} fill="none" stroke={ring} strokeWidth="2" opacity="0.35" />}
+        <circle r={FT_R} fill={isCommon ? ring + '22' : '#f8fafc'} stroke={ring} strokeWidth={isCommon ? 4 : 2} />
+        <text textAnchor="middle" dy="5" fontSize="14" fontWeight="700" fill={isCommon ? ring : '#64748b'}>{ftInitials(nm)}</text>
+        <circle cx={FT_R * 0.72} cy={FT_R * 0.72} r="8" fill={g.sexo === 'Gallina' ? '#ec4899' : '#3b82f6'} stroke="#fff" strokeWidth="1.5" />
+        <text x={FT_R * 0.72} y={FT_R * 0.72} textAnchor="middle" dy="3" fontSize="9" fill="#fff">{g.sexo === 'Gallina' ? '♀' : '♂'}</text>
+        {isCommon && <text x={-FT_R * 0.72} y={-FT_R * 0.72} textAnchor="middle" dy="4" fontSize="13" fill={ring}>★</text>}
+        <text textAnchor="middle" y={FT_R + 15} fontSize="11" fontWeight="600" fill="#1f2937">{ftTrunc(nm, 12)}</text>
+      </g>
+    );
+  };
+
+  return (
+    <Modal title="🔬 Análisis del cruce" onClose={onClose} wide>
+      <div className={`rounded-xl p-3 mb-3 ${info.cls}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide">Consanguinidad estimada (Wright)</p>
+            <p className="text-[11px] opacity-80">{info.txt} · {info.hint}</p>
+          </div>
+          <span className="text-2xl font-extrabold">{(analisis.F * 100).toFixed(1)}%</span>
+        </div>
+      </div>
+
+      {analisis.commons.length === 0 ? (
+        <p className="text-sm text-gray-500 bg-gray-50 rounded-xl p-3 mb-3">
+          No se detectaron ancestros en común en {6} generaciones. Es un cruce abierto (outcross): más variabilidad, menos "fijación" de tipo.
+        </p>
+      ) : (
+        <div className="mb-3">
+          <p className="text-xs font-bold text-gray-500 uppercase mb-1.5">Ancestros en común ({analisis.commons.length})</p>
+          <div className="space-y-1.5">
+            {analisis.commons.map(c => (
+              <div key={c.id} className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5">
+                <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ background: commonColor[c.id] }} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{nombreGallo(c.gallo)}
+                    {c.gallo.linea_genetica && <span className="text-[11px] text-gray-400 font-normal"> · {c.gallo.linea_genetica}</span>}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {c.combos.map((cm, i) => (
+                    <span key={i} className="text-[11px] font-bold rounded px-1.5 py-0.5" style={{ background: commonColor[c.id] + '22', color: commonColor[c.id] }}>
+                      {cm.nota}{cm.veces > 1 ? ` ×${cm.veces}` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-400 mt-1.5">
+            La notación <b>N×M</b> = generación en que aparece el ancestro por el lado del padre (N) y de la madre (M). Padre/Madre = 1, abuelos = 2, bisabuelos = 3…
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs font-bold text-gray-500 uppercase">Árboles lado a lado</p>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setZoom(z => Math.max(0.3, +(z - 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">−</button>
+          <span className="text-xs text-gray-500 w-9 text-center">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom(z => Math.min(1.4, +(z + 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">+</button>
+        </div>
+      </div>
+
+      <div className="htree-scroll border border-gray-100 rounded-xl bg-gradient-to-br from-gray-50 to-white" style={{ maxHeight: '55vh' }}>
+        <svg width={box.W * zoom} height={box.H * zoom} viewBox={`${box.minX} ${box.minY} ${box.W} ${box.H}`} style={{ display: 'block', minWidth: '100%' }}>
+          <text x={lay.padreX} y={box.minY + 22} textAnchor="middle" fontSize="14" fontWeight="700" fill="#2563eb">♂ {ftTrunc(nombreGallo(padre), 16)}</text>
+          <text x={lay.madreX} y={box.minY + 22} textAnchor="middle" fontSize="14" fontWeight="700" fill="#ec4899">♀ {ftTrunc(nombreGallo(madre), 16)}</text>
+          {lay.links.map((l, i) => <line key={'l' + i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#cbd5e1" strokeWidth="2" />)}
+          {lay.nodes.map(nodeEl)}
+        </svg>
+      </div>
+    </Modal>
+  );
+};
+
+// ============================================
 // MÓDULO: CASTADERO (Casta / Cruces)
 // ============================================
 const CATS_COLOR_HEX = { blue: '#2563eb', green: '#16a34a', red: '#dc2626', purple: '#9333ea' };
@@ -1051,8 +1247,11 @@ const CastaderoModule = () => {
   const [showGuardar, setShowGuardar] = useState(false);
   const [detalle, setDetalle] = useState(null);
   const [arbolGallo, setArbolGallo] = useState(null);
+  const [showAnalisis, setShowAnalisis] = useState(false);
   const [fechaCruce, setFechaCruce] = useState(new Date().toISOString().slice(0, 10));
   const [notas, setNotas] = useState('');
+
+  const consang = useMemo(() => (padre && madre) ? analizarConsanguinidad(padre, madre, gallos, cruces, 6) : null, [padre, madre, gallos, cruces]);
 
   const loadCruces = useCallback(async () => {
     const { data } = await supabase.from('cruces').select('*').eq('user_id', activeOwnerId).order('fecha_cruce', { ascending: false });
@@ -1115,6 +1314,25 @@ const CastaderoModule = () => {
               </button>
             )}
           </div>
+
+          {/* Consanguinidad / line breeding */}
+          {consang && (
+            <button onClick={() => setShowAnalisis(true)}
+              className={`w-full text-left rounded-xl p-3 mb-3 border ${interpretarF(consang.F).cls} border-transparent hover:opacity-90`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide">🔬 Consanguinidad ~{(consang.F * 100).toFixed(1)}%</p>
+                  <p className="text-[11px] opacity-80 truncate">
+                    {consang.commons.length === 0
+                      ? 'Cruce abierto · sin ancestros en común'
+                      : `${consang.commons.length} ancestro(s) en común · ${consang.commons.slice(0, 3).map(c => c.combos[0].nota).join(', ')}${consang.commons.length > 3 ? '…' : ''}`}
+                  </p>
+                </div>
+                <span className="text-xs font-semibold underline ml-2 flex-shrink-0">Ver árboles ▸</span>
+              </div>
+            </button>
+          )}
+
           <PrediccionCard prediccion={prediccion} />
         </>
       ) : (
@@ -1193,6 +1411,10 @@ const CastaderoModule = () => {
       )}
 
       {arbolGallo && <ArbolFamiliarModal gallos={gallos} cruces={cruces} initialFocusId={arbolGallo.id} onClose={() => setArbolGallo(null)} />}
+
+      {showAnalisis && padre && madre && (
+        <AnalisisCastaModal padre={padre} madre={madre} gallos={gallos} cruces={cruces} onClose={() => setShowAnalisis(false)} />
+      )}
     </div>
   );
 };
