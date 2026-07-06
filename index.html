@@ -696,6 +696,255 @@ const ArbolGenealogicoModal = ({ gallo, gallos, onClose, onSelect }) => {
 };
 
 // ============================================
+// ÁRBOL FAMILIAR (estilo genealógico con parejas ♥ y color por línea)
+// ============================================
+const FT_SLOT = 104, FT_GENV = 150, FT_R = 30;
+const LINEA_PALETTE = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777', '#ca8a04', '#4f46e5', '#0d9488', '#65a30d', '#e11d48', '#7c3aed', '#059669'];
+
+const ftBuildModel = (gallos, cruces) => {
+  cruces = cruces || [];
+  const byId = new Map(gallos.map(g => [g.id, g]));
+  const has = id => !!(id && byId.has(id));
+  const unions = new Map();
+  const keyOf = (p, m) => (p || 'NA') + '|' + (m || 'NA');
+  const ensureUnion = (p, m) => {
+    const k = keyOf(p, m);
+    if (!unions.has(k)) unions.set(k, { padreId: has(p) ? p : null, madreId: has(m) ? m : null, childIds: [] });
+    return unions.get(k);
+  };
+  gallos.forEach(g => { if (has(g.padre_id) || has(g.madre_id)) ensureUnion(g.padre_id, g.madre_id).childIds.push(g.id); });
+  cruces.forEach(c => { if (has(c.padre_id) || has(c.madre_id)) ensureUnion(c.padre_id, c.madre_id); });
+  const unionsByPerson = new Map();
+  const addUP = (pid, u, spouseId) => { if (!pid) return; if (!unionsByPerson.has(pid)) unionsByPerson.set(pid, []); unionsByPerson.get(pid).push({ union: u, spouseId }); };
+  for (const u of unions.values()) { addUP(u.padreId, u, u.madreId); addUP(u.madreId, u, u.padreId); }
+  const depthCache = new Map();
+  const depth = (id, guard) => {
+    guard = guard || new Set();
+    if (!has(id)) return 0;
+    if (depthCache.has(id)) return depthCache.get(id);
+    if (guard.has(id)) return 0;
+    guard.add(id);
+    const g = byId.get(id);
+    const dp = has(g.padre_id) ? depth(g.padre_id, guard) + 1 : 0;
+    const dm = has(g.madre_id) ? depth(g.madre_id, guard) + 1 : 0;
+    const d = Math.max(dp, dm); depthCache.set(id, d); return d;
+  };
+  return { byId, has, unions, unionsByPerson, depth };
+};
+
+const ftLayoutDescendants = (rootIds, model, startDepth, opts) => {
+  startDepth = startDepth || 0; opts = opts || {};
+  const useFallback = opts.fallback !== false;
+  const placed = new Set(), placedX = new Map(), ownedUnions = new Set();
+  const nodes = [], coupleLinks = [], childLinks = [];
+  let cursor = 0;
+  const unionsOf = pid => (model.unionsByPerson.get(pid) || []).filter((up, i, arr) => arr.findIndex(x => x.union === up.union) === i);
+  const placePerson = (id, x, y) => { nodes.push({ id, x, y }); placedX.set(id, x); };
+  const expand = (pid, depth) => {
+    if (placed.has(pid)) return placedX.has(pid) ? placedX.get(pid) : null;
+    placed.add(pid);
+    const y = depth * FT_GENV;
+    const ups = unionsOf(pid).filter(up => !ownedUnions.has(up.union));
+    ups.forEach(up => ownedUnions.add(up.union));
+    const childCenters = [];
+    ups.forEach(up => (up.union.childIds || []).forEach(cid => {
+      if (placed.has(cid)) { if (placedX.has(cid)) childCenters.push(placedX.get(cid)); return; }
+      const cx = expand(cid, depth + 1);
+      if (cx != null) childCenters.push(cx);
+    }));
+    const headerMembers = [pid];
+    ups.forEach(up => { if (up.spouseId && !placed.has(up.spouseId) && headerMembers.indexOf(up.spouseId) === -1) headerMembers.push(up.spouseId); });
+    const headerWidth = headerMembers.length * FT_SLOT;
+    let headerCenter;
+    if (childCenters.length > 0) {
+      headerCenter = (Math.min.apply(null, childCenters) + Math.max.apply(null, childCenters)) / 2;
+      const left = headerCenter - headerWidth / 2;
+      if (left < cursor) headerCenter += (cursor - left);
+    } else { headerCenter = cursor + headerWidth / 2; }
+    cursor = Math.max(cursor, headerCenter + headerWidth / 2 + FT_SLOT * 0.15);
+    const startX = headerCenter - headerWidth / 2 + FT_SLOT / 2;
+    const memberX = {};
+    headerMembers.forEach((mid, i) => { const x = startX + i * FT_SLOT; memberX[mid] = x; placed.add(mid); placePerson(mid, x, y); });
+    for (let i = 0; i < headerMembers.length - 1; i++) coupleLinks.push({ ax: memberX[headerMembers[i]], bx: memberX[headerMembers[i + 1]], y });
+    if (childCenters.length > 0) {
+      const busY = y + FT_GENV * 0.5, famBottomY = y + FT_R, childTopY = (depth + 1) * FT_GENV - FT_R;
+      childCenters.forEach(cx => childLinks.push({ famCx: headerCenter, famBottomY, busY, childX: cx, childTopY }));
+    }
+    return headerCenter;
+  };
+  rootIds.forEach(rid => { if (!placed.has(rid)) expand(rid, startDepth); });
+  if (useFallback) {
+    [...model.byId.keys()].filter(id => !placed.has(id)).sort((a, b) => model.depth(a) - model.depth(b))
+      .forEach(id => { if (!placed.has(id)) expand(id, startDepth); });
+  }
+  return { nodes, coupleLinks, childLinks };
+};
+
+const ftFullRoots = model => {
+  const isFounder = g => !model.has(g.padre_id) && !model.has(g.madre_id);
+  return [...model.byId.values()].filter(g => g.sexo !== 'Gallina' && isFounder(g)).map(g => g.id);
+};
+
+const ftLayoutFocus = (focusId, model) => {
+  const desc = ftLayoutDescendants([focusId], model, 0, { fallback: false });
+  const ancNodes = [], ancLinks = [];
+  const focusNode = desc.nodes.find(n => n.id === focusId);
+  const fx = focusNode ? focusNode.x : 0;
+  const up = (id, gen, x, spanW) => {
+    const g = model.byId.get(id);
+    if (!g) return;
+    const padre = model.has(g.padre_id) ? g.padre_id : null;
+    const madre = model.has(g.madre_id) ? g.madre_id : null;
+    if (!padre && !madre) return;
+    const y = -gen * FT_GENV, childY = -(gen - 1) * FT_GENV, half = spanW / 2;
+    const px = x - half / 2, mx = x + half / 2;
+    if (padre) { ancNodes.push({ id: padre, x: px, y }); ancLinks.push({ x1: x, y1: childY - FT_R, x2: px, y2: y + FT_R }); up(padre, gen + 1, px, spanW / 2); }
+    if (madre) { ancNodes.push({ id: madre, x: mx, y }); ancLinks.push({ x1: x, y1: childY - FT_R, x2: mx, y2: y + FT_R }); up(madre, gen + 1, mx, spanW / 2); }
+  };
+  up(focusId, 1, fx, FT_SLOT * 4);
+  return { desc, ancNodes, ancLinks };
+};
+
+const ftInitials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+const ftTrunc = (s, n) => { s = s || ''; return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+
+const ArbolFamiliarModal = ({ gallos, cruces, initialFocusId, onClose }) => {
+  const [mode, setMode] = useState(initialFocusId ? 'focus' : 'full');
+  const [focoId, setFocoId] = useState(initialFocusId || (gallos[0] && gallos[0].id) || null);
+  const [zoom, setZoom] = useState(0.85);
+
+  const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
+  const lineaColor = useMemo(() => {
+    const map = {}; let i = 0;
+    gallos.forEach(g => {
+      const l = g.linea_genetica || 'Sin línea';
+      if (!(l in map)) { map[l] = (l === 'Sin línea') ? '#9ca3af' : LINEA_PALETTE[i % LINEA_PALETTE.length]; i++; }
+    });
+    return map;
+  }, [gallos]);
+  const colorFor = g => lineaColor[g.linea_genetica || 'Sin línea'] || '#9ca3af';
+
+  const model = useMemo(() => ftBuildModel(gallos, cruces), [gallos, cruces]);
+  const L = useMemo(() => {
+    if (mode === 'focus' && focoId && byId.has(focoId)) {
+      const f = ftLayoutFocus(focoId, model);
+      return { nodes: f.desc.nodes.concat(f.ancNodes), coupleLinks: f.desc.coupleLinks, childLinks: f.desc.childLinks, ancLinks: f.ancLinks };
+    }
+    const d = ftLayoutDescendants(ftFullRoots(model), model);
+    return { nodes: d.nodes, coupleLinks: d.coupleLinks, childLinks: d.childLinks, ancLinks: [] };
+  }, [mode, focoId, model, byId]);
+
+  const pad = 90;
+  const box = useMemo(() => {
+    if (!L.nodes.length) return { minX: 0, minY: 0, W: 400, H: 300 };
+    const xs = L.nodes.map(n => n.x), ys = L.nodes.map(n => n.y);
+    const minX = Math.min.apply(null, xs) - pad, maxX = Math.max.apply(null, xs) + pad;
+    const minY = Math.min.apply(null, ys) - pad, maxY = Math.max.apply(null, ys) + pad;
+    return { minX, minY, W: Math.max(1, maxX - minX), H: Math.max(1, maxY - minY) };
+  }, [L]);
+
+  const lineasPresentes = useMemo(() => {
+    const set = new Set(); L.nodes.forEach(n => { const g = byId.get(n.id); if (g) set.add(g.linea_genetica || 'Sin línea'); });
+    return [...set];
+  }, [L, byId]);
+
+  const renderNode = (n, i) => {
+    const g = byId.get(n.id); if (!g) return null;
+    const color = colorFor(g);
+    const year = (g.fecha_nacimiento || '').slice(0, 4);
+    const nm = nombreGallo(g);
+    const isFoco = mode === 'focus' && g.id === focoId;
+    return (
+      <g key={g.id + ':' + i} transform={`translate(${n.x},${n.y})`} style={{ cursor: 'pointer' }}
+        onClick={() => { setFocoId(g.id); setMode('focus'); }}>
+        {isFoco && <circle r={FT_R + 6} fill="none" stroke={color} strokeWidth="2" opacity="0.4" />}
+        {g.foto
+          ? <image href={g.foto} x={-FT_R} y={-FT_R} width={FT_R * 2} height={FT_R * 2} preserveAspectRatio="xMidYMid slice" style={{ clipPath: 'circle(50%)' }} />
+          : <circle r={FT_R} fill={color + '22'} />}
+        <circle r={FT_R} fill="none" stroke={color} strokeWidth={isFoco ? 4 : 3} />
+        {!g.foto && <text textAnchor="middle" dy="5" fontSize="15" fontWeight="700" fill={color}>{ftInitials(nm)}</text>}
+        <circle cx={FT_R * 0.72} cy={FT_R * 0.72} r="9" fill={g.sexo === 'Gallina' ? '#ec4899' : '#3b82f6'} stroke="#fff" strokeWidth="1.5" />
+        <text x={FT_R * 0.72} y={FT_R * 0.72} textAnchor="middle" dy="3.5" fontSize="10" fill="#fff">{g.sexo === 'Gallina' ? '♀' : '♂'}</text>
+        <text textAnchor="middle" y={FT_R + 16} fontSize="12" fontWeight="700" fill="#1f2937">{ftTrunc(nm, 14)}</text>
+        {year && <text textAnchor="middle" y={FT_R + 30} fontSize="10" fill="#9ca3af">{year}</text>}
+      </g>
+    );
+  };
+
+  return (
+    <Modal title="🌳 Árbol familiar" onClose={onClose} wide>
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="inline-flex rounded-lg bg-gray-100 p-0.5">
+          <button onClick={() => setMode('full')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold ${mode === 'full' ? 'bg-white shadow text-red-700' : 'text-gray-500'}`}>
+            Todo el criadero
+          </button>
+          <button onClick={() => setMode('focus')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold ${mode === 'focus' ? 'bg-white shadow text-red-700' : 'text-gray-500'}`}>
+            Enfocar gallo
+          </button>
+        </div>
+        {mode === 'focus' && (
+          <select value={focoId || ''} onChange={e => setFocoId(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs max-w-[160px]">
+            {gallos.map(g => <option key={g.id} value={g.id}>{nombreGallo(g)}</option>)}
+          </select>
+        )}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <button onClick={() => setZoom(z => Math.max(0.35, +(z - 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">−</button>
+          <span className="text-xs text-gray-500 w-9 text-center">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom(z => Math.min(1.6, +(z + 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">+</button>
+        </div>
+      </div>
+
+      {/* Leyenda de líneas */}
+      {lineasPresentes.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {lineasPresentes.map(l => (
+            <span key={l} className="inline-flex items-center gap-1 text-[11px] text-gray-600">
+              <span className="inline-block w-3 h-3 rounded-full" style={{ background: lineaColor[l] }} />{l}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[11px] text-gray-400 mb-2">
+        {mode === 'focus' ? 'Ancestros arriba, descendientes abajo. Toca cualquier gallo para enfocarlo.' : 'Todo el criadero por generaciones. Toca un gallo para ver solo su rama.'}
+        {' '}Usa el zoom y desliza para moverte.
+      </p>
+
+      <div className="htree-scroll border border-gray-100 rounded-xl bg-gradient-to-br from-gray-50 to-white" style={{ maxHeight: '62vh' }}>
+        {L.nodes.length === 0 ? (
+          <p className="text-center text-gray-400 py-12 text-sm">No hay gallos para dibujar todavía.</p>
+        ) : (
+          <svg width={box.W * zoom} height={box.H * zoom} viewBox={`${box.minX} ${box.minY} ${box.W} ${box.H}`}
+            style={{ display: 'block', minWidth: '100%' }}>
+            {/* conectores hijos (escuadra) */}
+            {L.childLinks.map((l, i) => (
+              <path key={'cl' + i} d={`M ${l.famCx} ${l.famBottomY} L ${l.famCx} ${l.busY} L ${l.childX} ${l.busY} L ${l.childX} ${l.childTopY}`}
+                fill="none" stroke="#cbd5e1" strokeWidth="2" />
+            ))}
+            {/* conectores ancestros */}
+            {L.ancLinks.map((l, i) => (
+              <line key={'al' + i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#e5b4c0" strokeWidth="2" strokeDasharray="4 3" />
+            ))}
+            {/* parejas ♥ */}
+            {L.coupleLinks.map((c, i) => (
+              <g key={'cp' + i}>
+                <line x1={c.ax + FT_R} y1={c.y} x2={c.bx - FT_R} y2={c.y} stroke="#f9a8d4" strokeWidth="2.5" />
+                <text x={(c.ax + c.bx) / 2} y={c.y} textAnchor="middle" dy="4.5" fontSize="14" fill="#ec4899">♥</text>
+              </g>
+            ))}
+            {/* nodos */}
+            {L.nodes.map(renderNode)}
+          </svg>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
+// ============================================
 // MÓDULO: CASTADERO (Casta / Cruces)
 // ============================================
 const CATS_COLOR_HEX = { blue: '#2563eb', green: '#16a34a', red: '#dc2626', purple: '#9333ea' };
@@ -943,7 +1192,7 @@ const CastaderoModule = () => {
         />
       )}
 
-      {arbolGallo && <ArbolGenealogicoModal gallo={arbolGallo} gallos={gallos} onClose={() => setArbolGallo(null)} />}
+      {arbolGallo && <ArbolFamiliarModal gallos={gallos} cruces={cruces} initialFocusId={arbolGallo.id} onClose={() => setArbolGallo(null)} />}
     </div>
   );
 };
@@ -1420,7 +1669,7 @@ const GeneticaModule = () => {
       </div>
 
       {/* Modal Árbol */}
-      {showArbol && <ArbolGenealogicoModal gallo={showArbol} gallos={gallos} onClose={() => setShowArbol(null)} />}
+      {showArbol && <ArbolFamiliarModal gallos={gallos} cruces={[]} initialFocusId={showArbol.id} onClose={() => setShowArbol(null)} />}
       <PhotoViewer src={viewingPhoto} onClose={() => setViewingPhoto(null)} />
 
       {/* Modal Formulario */}
@@ -3989,11 +4238,11 @@ const App = ({ user }) => {
   }, [activeOwnerId]);
 
   const TABS = [
-    { id: 'dashboard', label: '📊 Dashboard' },
-    { id: 'gallos', label: '🐓 Gallos' },
-    { id: 'castadero', label: '🧬 Castadero' },
-    { id: 'entrenamientos', label: '🏋️ Entrenamientos' },
-    { id: 'peleas', label: '⚔️ Peleas' },
+    { id: 'dashboard', label: '📊', text: 'Inicio' },
+    { id: 'gallos', label: '🐓', text: 'Gallos' },
+    { id: 'castadero', label: '🧬', text: 'Casta' },
+    { id: 'entrenamientos', label: '🏋️', text: 'Entreno' },
+    { id: 'peleas', label: '⚔️', text: 'Peleas' },
   ];
 
   return (
@@ -4034,8 +4283,9 @@ const App = ({ user }) => {
           <div className="flex max-w-2xl mx-auto">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex-1 py-3 text-center text-xs font-medium transition-colors ${tab === t.id ? 'text-red-700 border-t-2 border-red-700 -mt-px' : 'text-gray-500 hover:text-gray-700'}`}>
-                {t.label}
+                className={`flex-1 py-2 flex flex-col items-center justify-center gap-0.5 font-medium transition-colors ${tab === t.id ? 'text-red-700 border-t-2 border-red-700 -mt-px' : 'text-gray-500 hover:text-gray-700'}`}>
+                <span className="text-lg leading-none">{t.label}</span>
+                <span className="text-[10px] leading-none whitespace-nowrap">{t.text}</span>
               </button>
             ))}
           </div>
