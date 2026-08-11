@@ -41,12 +41,16 @@ function sanea(rows) {
   return rows.slice(0, 20000).map(r => ({
     id: limpia(r && r.id, 60),
     u: limpia(r && r.u, 200),
+    em: limpia(r && r.em, 200),
     pn: limpia(r && r.pn, 40),
     ag: limpia(r && r.ag, 200),
     tk: limpia(r && r.tk, 60),
+    orig: limpia(r && r.orig, 120),
     cat: limpia(r && r.cat, 120),
-    com: limpia(r && r.com, 4000),
     prob: limpia(r && r.prob, 4000),
+    res: limpia(r && r.res, 4000),
+    com: limpia(r && r.com, 4000),
+    trab: limpia(r && r.trab, 120),
     fecha: limpia(r && r.fecha, 40)
   }));
 }
