@@ -266,6 +266,10 @@ textarea.dtexto{resize:vertical;min-height:52px;white-space:pre-wrap}
 #t-out tr.esdup td:first-child{box-shadow:inset 3px 0 0 #e08b7d}
 .tk{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:650;color:var(--nv)}
 
+.vsello{font-size:10.5px;color:rgba(255,255,255,.62);background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:4px 9px;white-space:nowrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.3px}
+
 </style>
 </head>
 <body>
@@ -275,7 +279,7 @@ textarea.dtexto{resize:vertical;min-height:52px;white-space:pre-wrap}
       <h1>Herramientas ERP &mdash; Government of Puerto Rico</h1>
       <div class="sub">Los Excel se procesan solo en tu navegador. La tabla de <b>Usuarios en Destaque</b> s&iacute; se guarda en el servidor, para que todos vean lo mismo.</div>
     </div>
-    <button class="salir hide" id="salir">Cerrar sesi&oacute;n</button>
+    <div style="display:flex;align-items:center;gap:10px"><span class="vsello" id="ver" title="Versi&oacute;n de esta p&aacute;gina">2026-08-11 · 46269a</span><button class="salir hide" id="salir">Cerrar sesi&oacute;n</button></div>
   </div>
   <div class="tabs">
     <button class="tab on" data-tab="roles"><span class="dot off"></span>Roles y Usuarios</button>
