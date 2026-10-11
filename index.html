@@ -775,6 +775,65 @@ const repetidosAmbosLados = (padre, madre, gallos, byId) => {
     .sort((a, b) => b.total - a.total);
 };
 
+// Igual que aporteAncestros pero contando por cuántos caminos sale cada uno
+const aporteDetalle = (id, byId, maxGen) => {
+  maxGen = maxGen || 8;
+  const m = new Map();
+  const rec = (x, e, path, via) => {
+    if (!x || !byId.has(x) || e > maxGen || path.has(x)) return;
+    const o = m.get(x) || { g: byId.get(x), frac: 0, veces: 0, via: new Set() };
+    o.frac += Math.pow(0.5, e); o.veces += 1; if (via) o.via.add(via); m.set(x, o);
+    const g = byId.get(x); const np = new Set(path); np.add(x);
+    rec(g.padre_id, e + 1, np, x); rec(g.madre_id, e + 1, np, x);
+  };
+  rec(id, 0, new Set(), null);
+  return m;
+};
+// Marca como "repetido" solo al que se repite por cuenta propia, no al que sale dos veces
+// únicamente porque es padre o abuelo de otro que ya se repite.
+const marcarRepetidos = (det) => {
+  det.forEach(o => {
+    const maxHijo = Math.max(0, ...[...o.via].map(c => det.has(c) ? det.get(c).veces : 0));
+    o.rep = o.veces > 1 && o.veces > maxHijo;
+  });
+  return det;
+};
+// Ordena la sangre más fuerte: primero los que se repiten, luego por porciento.
+// "directos" (padre y madre) solo se listan si se repiten, porque siempre son 50%.
+const rankingSangre = (det, omitir, directos, max) => {
+  marcarRepetidos(det);
+  const todos = [...det.values()].filter(o => !omitir.has(o.g.id) && (o.rep || !directos.has(o.g.id)));
+  todos.sort((a, b) => (b.rep ? 1 : 0) - (a.rep ? 1 : 0) || b.frac - a.frac || a.veces - b.veces);
+  const repetidos = todos.filter(o => o.rep);
+  return todos.slice(0, Math.max(max || 5, Math.min(repetidos.length, 8)));
+};
+
+const SangreFuerte = ({ items, sujeto }) => {
+  if (items.length === 0) return <p className="text-xs text-gray-400">No hay abuelos registrados todavía.</p>;
+  const tope = Math.max.apply(null, items.map(o => o.frac));
+  const hayRep = !!items[0].rep;
+  return (
+    <div className="space-y-2">
+      {items.map((o, i) => (
+        <div key={o.g.id}>
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="min-w-0 truncate">
+              <span className={`font-semibold ${o.rep ? 'text-amber-900' : 'text-gray-700'}`}>{sexoIcon(o.g)} {nombreGallo(o.g)}</span>
+              {o.rep && <span className="ml-1.5 text-[10px] font-bold bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded-full">sale {o.veces} veces</span>}
+              {i === 0 && hayRep && <span className="ml-1 text-[10px] font-bold text-amber-700">💪 el más fuerte</span>}
+            </span>
+            <b className={`flex-shrink-0 ${o.rep ? 'text-amber-900 text-sm' : 'text-gray-800'}`}>{pedPct(o.frac)}</b>
+          </div>
+          <div className="h-2 rounded-full bg-gray-100 mt-1 overflow-hidden">
+            <div className="h-2 rounded-full" style={{ width: (o.frac / tope * 100) + '%', background: o.rep ? '#f59e0b' : '#94a3b8' }} />
+          </div>
+        </div>
+      ))}
+      <p className="text-[11px] text-gray-400">% de la sangre de {sujeto} que viene de cada uno. Los que salen más de una vez suman cada vez que aparecen.</p>
+    </div>
+  );
+};
+
 const BarraSangre = ({ comp, max }) => {
   max = max || 7;
   let items = comp;
@@ -913,6 +972,7 @@ const PedigriModal = ({ gallos, initialFocusId, onClose }) => {
 
   const comp = useMemo(() => foco ? sangreLista(sangreAncestros(focoId, byId)) : [], [focoId, byId, foco]);
   const aporte = useMemo(() => foco ? aporteAncestros(focoId, byId) : new Map(), [focoId, byId, foco]);
+  const fuertes = useMemo(() => foco ? rankingSangre(aporteDetalle(focoId, byId), new Set([focoId]), new Set([foco.padre_id, foco.madre_id]), 5) : [], [focoId, byId, foco]);
 
   if (!foco) return <Modal title="🌳 Árbol" onClose={onClose}><p className="text-sm text-gray-500 text-center py-6">No se encontró este gallo.</p></Modal>;
 
@@ -962,8 +1022,12 @@ const PedigriModal = ({ gallos, initialFocusId, onClose }) => {
         <div>
           {!(comp.length === 1 && comp[0].key === foco.id) && (
             <div className="bg-white border border-gray-200 rounded-xl p-3 mb-3">
-              <p className="text-xs font-bold text-gray-600 mb-1.5">🩸 De quién viene su sangre</p>
-              <BarraSangre comp={comp} />
+              <p className="text-sm font-bold text-gray-700 mb-2">🩸 Sangre más fuerte</p>
+              <SangreFuerte items={fuertes} sujeto={nombreGallo(foco)} />
+              <details className="mt-3 border-t border-gray-100 pt-2">
+                <summary className="text-xs font-semibold text-gray-500 cursor-pointer">Ver de dónde viene al fondo (los más antiguos)</summary>
+                <div className="mt-2"><BarraSangre comp={comp} /></div>
+              </details>
             </div>
           )}
 
@@ -1859,11 +1923,18 @@ const SangreCriaCard = ({ padre, madre, gallos }) => {
   const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
   const comp = useMemo(() => sangreCria(padre.id, madre.id, byId), [padre, madre, byId]);
   const rep = useMemo(() => repetidosAmbosLados(padre, madre, gallos, byId), [padre, madre, gallos, byId]);
+  const fuertes = useMemo(() => {
+    const det = new Map();
+    [padre.id, madre.id].forEach(pid => aporteDetalle(pid, byId).forEach((o, id) => {
+      const x = det.get(id) || { g: o.g, frac: 0, veces: 0, via: new Set() };
+      x.frac += o.frac / 2; x.veces += o.veces; o.via.forEach(v => x.via.add(v)); det.set(id, x);
+    }));
+    return rankingSangre(det, new Set(), new Set([padre.id, madre.id]), 5);
+  }, [padre, madre, byId]);
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-3 mb-3">
-      <p className="text-sm font-bold text-gray-700">🩸 De quién viene la cría</p>
-      <p className="text-[11px] text-gray-400 mb-2">Viene de la descendencia de estos gallos y gallinas:</p>
-      <BarraSangre comp={comp} />
+      <p className="text-sm font-bold text-gray-700 mb-2">🩸 Sangre más fuerte de la cría</p>
+      <SangreFuerte items={fuertes} sujeto="la cría" />
       {rep.length > 0 ? (
         <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
           <p className="text-xs font-bold text-amber-800 mb-1">🔁 Se repiten por los dos lados</p>
@@ -1884,6 +1955,10 @@ const SangreCriaCard = ({ padre, madre, gallos }) => {
       ) : (
         <p className="mt-3 text-[11px] text-green-700 bg-green-50 rounded-lg px-2.5 py-1.5">Ningún gallo ni gallina se repite por los dos lados.</p>
       )}
+      <details className="mt-3 border-t border-gray-100 pt-2">
+        <summary className="text-xs font-semibold text-gray-500 cursor-pointer">Ver de dónde viene al fondo (los más antiguos)</summary>
+        <div className="mt-2"><BarraSangre comp={comp} /></div>
+      </details>
     </div>
   );
 };
