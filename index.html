@@ -2397,6 +2397,16 @@ const DetalleCastaModal = ({ cruce, gallos, eventos, onClose, onReload, onVerArb
     toast('Pollo añadido ✓'); onReload();
   };
 
+  const eliminarCasta = async () => {
+    const aviso = '¿Eliminar la casta ' + nombreGallo(p) + ' × ' + nombreGallo(m) + '?\n\nSe borra la casta y todo lo anotado (huevos, empolle, notas). No se puede deshacer.' +
+      (pollos.length ? '\n\nLos ' + pollos.length + ' pollos NO se borran: se quedan en tu lista de gallos con su padre y su madre.' : '');
+    if (!confirm(aviso)) return;
+    const { data, error } = await supabase.from('cruces').delete().eq('id', cruce.id).select('id');
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    if (!data || data.length === 0) { toast('Solo el dueño de la gallera puede eliminar una casta', 'error'); return; }
+    toast('Casta eliminada'); onClose(); onReload();
+  };
+
   const cerrar = async (estado) => {
     const { error } = await supabase.from('cruces').update({ estado }).eq('id', cruce.id);
     if (error) { toast('Error: ' + error.message, 'error'); return; }
@@ -2517,11 +2527,14 @@ const DetalleCastaModal = ({ cruce, gallos, eventos, onClose, onReload, onVerArb
         </div>
 
         {canEdit && (
+          <div>
           <div className="flex gap-2">
             {cruce.estado !== 'Cerrado' && !r.fallido && <button onClick={() => abrir('fallido')} className="flex-1 border border-gray-200 text-gray-500 py-2 rounded-lg text-xs font-semibold">✖️ Se perdió</button>}
             {cruce.estado === 'Cerrado'
               ? <button onClick={() => cerrar(r.estado)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-xs font-semibold">Reabrir casta</button>
               : <button onClick={() => cerrar('Cerrado')} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-xs font-semibold">Cerrar casta</button>}
+          </div>
+            <button onClick={eliminarCasta} className="w-full mt-2 border border-red-200 text-red-600 py-2 rounded-lg text-xs font-semibold hover:bg-red-50">🗑 Eliminar casta</button>
           </div>
         )}
       </div>
