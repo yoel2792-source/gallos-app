@@ -1,0 +1,17 @@
+{
+  "name": "Gallero PR",
+  "short_name": "Gallero",
+  "description": "Busca tus gallos, mira su familia y sigue tus castas.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#b91c1c",
+  "theme_color": "#b91c1c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
