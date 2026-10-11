@@ -2566,15 +2566,40 @@ const GeneticaModule = () => {
   const caracteristicas = opciones['caracteristicas'] || [];
   const [nuevaCar, setNuevaCar] = useState('');
 
+  const [filtroSexo, setFiltroSexo] = useState('todos');   // todos | Gallo | Gallina | Pollo
+  const [soloAmarrados, setSoloAmarrados] = useState(false);
+  const [orden, setOrden] = useState('nombre');             // nombre | recientes | pinche
+
+  const sinAcentos = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const filteredGallos = useMemo(() => {
-    if (!searchQ) return gallos;
-    const q = searchQ.toLowerCase();
-    return gallos.filter(g =>
-      (g.nombre && g.nombre.toLowerCase().includes(q)) ||
-      (g.numero_pinches && g.numero_pinches.toString().includes(q)) ||
-      (g.linea_genetica && g.linea_genetica.toLowerCase().includes(q))
+    const q = sinAcentos(searchQ).trim().replace(/^#/, '');
+    let L = gallos.filter(g =>
+      (filtroSexo === 'todos' || g.sexo === filtroSexo) &&
+      (!soloAmarrados || g.amarrado) &&
+      (!q ||
+        sinAcentos(g.nombre).includes(q) ||
+        (g.numero_pinches != null && String(g.numero_pinches).includes(q)) ||
+        sinAcentos(g.linea_genetica).includes(q) ||
+        sinAcentos(g.color).includes(q) ||
+        (g.jaula != null && ('jaula ' + g.jaula) === q))
     );
-  }, [gallos, searchQ]);
+    L = L.slice();
+    if (orden === 'recientes') L.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    else if (orden === 'pinche') L.sort((a, b) => (a.numero_pinches == null) - (b.numero_pinches == null) || (a.numero_pinches || 0) - (b.numero_pinches || 0));
+    else L.sort((a, b) => !a.nombre - !b.nombre || sinAcentos(a.nombre).localeCompare(sinAcentos(b.nombre)) || (a.numero_pinches || 0) - (b.numero_pinches || 0));
+    return L;
+  }, [gallos, searchQ, filtroSexo, soloAmarrados, orden]);
+
+  const conteo = useMemo(() => ({
+    todos: gallos.length,
+    Gallo: gallos.filter(g => g.sexo === 'Gallo').length,
+    Gallina: gallos.filter(g => g.sexo === 'Gallina').length,
+    Pollo: gallos.filter(g => g.sexo === 'Pollo').length,
+    amarrados: gallos.filter(g => g.amarrado && (filtroSexo === 'todos' || g.sexo === filtroSexo)).length,
+  }), [gallos, filtroSexo]);
+  const fechaAnadido = (g) => g.created_at ? new Date(g.created_at).toLocaleDateString('es-PR', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+  const esNuevo = (g) => g.created_at && (Date.now() - new Date(g.created_at).getTime()) < 7 * 86400000;
+  const hayFiltros = filtroSexo !== 'todos' || soloAmarrados || !!searchQ;
 
   const handleSave = async () => {
     if (!form.numero_pinches && !form.nombre) {
@@ -2831,27 +2856,55 @@ const GeneticaModule = () => {
       </div>
 
       {/* Búsqueda */}
-      <Input type="text" placeholder="Buscar por nombre, pinches o línea..." value={searchQ}
-        onChange={e => setSearchQ(e.target.value)} className="mb-4" />
+      <Input type="text" placeholder="Buscar por nombre, pinche, color o línea..." value={searchQ}
+        onChange={e => setSearchQ(e.target.value)} />
+
+      {/* Filtros */}
+      <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
+        {[['todos', 'Todos'], ['Gallo', '♂ Gallos'], ['Gallina', '♀ Gallinas']].concat(conteo.Pollo > 0 ? [['Pollo', '🐣 Pollos']] : []).map(([id, txt]) => (
+          <button key={id} onClick={() => setFiltroSexo(id)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border ${filtroSexo === id ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+            {txt} <span className={filtroSexo === id ? 'text-red-100' : 'text-gray-400'}>{conteo[id]}</span>
+          </button>
+        ))}
+        <button onClick={() => setSoloAmarrados(v => !v)}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border ${soloAmarrados ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200'}`}>
+          🔗 Amarrados <span className={soloAmarrados ? 'text-gray-300' : 'text-gray-400'}>{conteo.amarrados}</span>
+        </button>
+      </div>
+      <div className="flex items-center justify-between mt-2 mb-3">
+        <p className="text-xs text-gray-500">
+          {filteredGallos.length} {hayFiltros ? 'encontrados' : 'en total'}
+          {hayFiltros && <button onClick={() => { setFiltroSexo('todos'); setSoloAmarrados(false); setSearchQ(''); }} className="ml-2 text-red-600 font-semibold">Quitar filtros</button>}
+        </p>
+        <select value={orden} onChange={e => setOrden(e.target.value)}
+          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
+          <option value="nombre">Orden: nombre A–Z</option>
+          <option value="recientes">Orden: añadidos recientes</option>
+          <option value="pinche">Orden: # de pinche</option>
+        </select>
+      </div>
 
       {/* Lista */}
       <div className="space-y-2">
         {filteredGallos.length === 0 ? (
-          <p className="text-center text-gray-400 py-12">No hay gallos registrados</p>
+          <p className="text-center text-gray-400 py-12">{hayFiltros ? 'Ninguno cumple con esa búsqueda' : 'No hay gallos registrados'}</p>
         ) : filteredGallos.map(g => (
           <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 active:bg-gray-50">
             <div className="flex items-start justify-between">
               {g.foto && <img src={g.foto} className="w-12 h-12 rounded-lg object-cover mr-3 flex-shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); setViewingPhoto(g.foto); }} />}
               <div className="flex-1 min-w-0" onClick={() => handleEdit(g)}>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-gray-800 truncate">{g.nombre || 'Sin nombre'}</span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-bold text-gray-800">{g.nombre || 'Sin nombre'}</span>
                   {g.numero_pinches && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">#{g.numero_pinches}</span>}
-                  {g.amarrado && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Amarrado{g.jaula ? ` • Jaula ${g.jaula}` : ''}</span>}
-                  <span className="text-xs text-gray-400">{g.sexo === 'Gallina' ? '♀' : '♂'}</span>
+                  {g.amarrado && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">Amarrado{g.jaula ? ` • Jaula ${g.jaula}` : ''}</span>}
+                  <span className="text-xs text-gray-400">{sexoIcon(g)}</span>
+                  {esNuevo(g) && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold flex-shrink-0">NUEVO</span>}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {[g.linea_genetica, g.color].filter(Boolean).join(' • ') || 'Sin datos adicionales'}
                 </p>
+                {fechaAnadido(g) && <p className="text-[11px] text-gray-400 mt-0.5">📅 Añadido el {fechaAnadido(g)}</p>}
                 {g.caracteristicas && g.caracteristicas.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {g.caracteristicas.slice(0, 4).map(c => <span key={c} className="text-[10px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">{c}</span>)}
