@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- BUILD 2026-07-05 · v3: Castadero + Arbol familiar + Consanguinidad + Asesor de cruces -->
+<!-- BUILD 2026-10-11 · v4: Pedigrí con hermanos + Castadero con sangre por ancestro, seguimiento y calendario -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -472,7 +472,7 @@ const nombreGallo = (g) => {
   if (!g) return 'Desconocido';
   return g.nombre || (g.numero_pinches ? '#' + g.numero_pinches : 'Sin nombre');
 };
-const sexoIcon = (g) => (g && g.sexo === 'Gallina' ? '♀' : '♂');
+const sexoIcon = (g) => (g && g.sexo === 'Gallina' ? '♀' : g && g.sexo === 'Pollo' ? '🐣' : '♂');
 
 // ============================================
 // MOTOR HEURÍSTICO DE PREDICCIÓN DE CRÍA
@@ -718,39 +718,86 @@ const pedRol = (gen, hembra) =>
   : (hembra ? 'Tatarabuela' : 'Tatarabuelo');
 const pedPct = (frac) => { const p = frac * 100; return (Number.isInteger(p) ? p : +p.toFixed(p < 10 ? 2 : 1)) + '%'; };
 
-// Composición de sangre por línea. Si se conocen los padres se hereda 50/50 de cada uno;
-// un gallo sin padres registrados aporta su propia línea (o "Sangre de <nombre>" si no tiene).
-const sangreDe = (id, byId, maxGen) => {
-  maxGen = maxGen || 6;
-  const out = {};
-  const add = (k, w) => { out[k] = (out[k] || 0) + w; };
+// Sangre por ancestro: de qué gallos y gallinas viene. Se reparte 50/50 hacia atrás hasta
+// llegar a los que no tienen padres registrados (los "fundadores").
+const sangreAncestros = (id, byId, maxGen) => {
+  maxGen = maxGen || 8;
+  const out = new Map();
+  const add = (key, nombre, g, w) => { const o = out.get(key) || { key, nombre, g, frac: 0 }; o.frac += w; out.set(key, o); };
   const rec = (gid, w, gen, path) => {
     const g = gid ? byId.get(gid) : null;
-    if (!g) { add('Desconocido', w); return; }
-    const etiqueta = (g.linea_genetica || '').trim();
+    if (!g) { add('?', 'Desconocido', null, w); return; }
     const p = byId.has(g.padre_id) ? g.padre_id : null;
     const m = byId.has(g.madre_id) ? g.madre_id : null;
-    if ((!p && !m) || gen >= maxGen || path.has(gid)) { add(etiqueta || ('Sangre de ' + nombreGallo(g)), w); return; }
+    if ((!p && !m) || gen >= maxGen || path.has(gid)) { add(g.id, nombreGallo(g), g, w); return; }
     const np = new Set(path); np.add(gid);
-    [p, m].forEach(x => { if (x) rec(x, w / 2, gen + 1, np); else add(etiqueta || 'Desconocido', w / 2); });
+    [p, m].forEach(x => { if (x) rec(x, w / 2, gen + 1, np); else add('?', 'Desconocido', null, w / 2); });
   };
   rec(id, 1, 0, new Set());
-  return Object.keys(out).map(k => ({ linea: k, frac: out[k] })).sort((a, b) => b.frac - a.frac);
+  return out;
+};
+const sangreLista = (map) => [...map.values()].sort((a, b) => (a.key === '?') - (b.key === '?') || b.frac - a.frac);
+const sangreCria = (padreId, madreId, byId) => {
+  const out = new Map();
+  [padreId, madreId].forEach(pid => sangreAncestros(pid, byId).forEach(o => {
+    const x = out.get(o.key) || { key: o.key, nombre: o.nombre, g: o.g, frac: 0 };
+    x.frac += o.frac / 2; out.set(o.key, x);
+  }));
+  return sangreLista(out);
 };
 
-const BarraSangre = ({ comp }) => {
-  const color = (c, i) => c.linea === 'Desconocido' ? '#9ca3af' : LINEA_PALETTE[i % LINEA_PALETTE.length];
+// Cuánta sangre de cada ancestro lleva un animal (él mismo = 100%)
+const aporteAncestros = (id, byId, maxGen) => {
+  maxGen = maxGen || 8;
+  const m = new Map();
+  const rec = (x, e, path) => {
+    if (!x || !byId.has(x) || e > maxGen || path.has(x)) return;
+    m.set(x, (m.get(x) || 0) + Math.pow(0.5, e));
+    const g = byId.get(x); const np = new Set(path); np.add(x);
+    rec(g.padre_id, e + 1, np); rec(g.madre_id, e + 1, np);
+  };
+  rec(id, 0, new Set());
+  return m;
+};
+
+// Ancestros que salen por los dos lados (padre y madre) con el % de sangre que dejan en la cría.
+// Se omiten los que solo se repiten "a través" de otro repetido más cercano.
+const repetidosAmbosLados = (padre, madre, gallos, byId) => {
+  const A = aporteAncestros(padre.id, byId), B = aporteAncestros(madre.id, byId);
+  const comunes = [...A.keys()].filter(id => B.has(id));
+  const set = new Set(comunes);
+  return comunes.filter(id => {
+    const hijos = gallos.filter(g => set.has(g.id) && (g.padre_id === id || g.madre_id === id));
+    if (hijos.length === 0) return true;
+    const viaA = hijos.reduce((s, h) => s + A.get(h.id) / 2, 0), viaB = hijos.reduce((s, h) => s + B.get(h.id) / 2, 0);
+    return Math.abs(A.get(id) - viaA) > 1e-9 || Math.abs(B.get(id) - viaB) > 1e-9;
+  }).map(id => ({ g: byId.get(id), porPadre: A.get(id), porMadre: B.get(id), total: (A.get(id) + B.get(id)) / 2 }))
+    .sort((a, b) => b.total - a.total);
+};
+
+const BarraSangre = ({ comp, max }) => {
+  max = max || 7;
+  let items = comp;
+  if (comp.length > max) {
+    const top = comp.filter(c => c.key !== '?').slice(0, max - 1);
+    const resto = comp.filter(c => top.indexOf(c) === -1);
+    items = top.concat([{ key: 'otros', nombre: `Otros (${resto.length})`, frac: resto.reduce((s, c) => s + c.frac, 0) }]);
+  }
+  const color = (c, i) => (c.key === '?' || c.key === 'otros') ? '#9ca3af' : LINEA_PALETTE[i % LINEA_PALETTE.length];
   return (
     <div>
       <div className="flex h-4 rounded-full overflow-hidden bg-gray-100">
-        {comp.map((c, i) => <div key={c.linea} style={{ width: (c.frac * 100) + '%', background: color(c, i) }} />)}
+        {items.map((c, i) => <div key={c.key} style={{ width: (c.frac * 100) + '%', background: color(c, i) }} />)}
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
-        {comp.map((c, i) => (
-          <span key={c.linea} className="text-[11px] text-gray-600 flex items-center gap-1">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: color(c, i) }} />
-            {c.linea} <b className="text-gray-800">{pedPct(c.frac)}</b>
-          </span>
+      <div className="mt-2 space-y-1">
+        {items.map((c, i) => (
+          <div key={c.key} className="flex items-center justify-between text-xs text-gray-700">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: color(c, i) }} />
+              <span className="truncate">{c.g ? sexoIcon(c.g) + ' ' : ''}{c.nombre}</span>
+            </span>
+            <b className="text-gray-900 ml-2 flex-shrink-0">{pedPct(c.frac)}</b>
+          </div>
         ))}
       </div>
     </div>
@@ -864,7 +911,8 @@ const PedigriModal = ({ gallos, initialFocusId, onClose }) => {
     return map;
   }, [focoId, byId, maxGen]);
 
-  const comp = useMemo(() => foco ? sangreDe(focoId, byId, 6) : [], [focoId, byId, foco]);
+  const comp = useMemo(() => foco ? sangreLista(sangreAncestros(focoId, byId)) : [], [focoId, byId, foco]);
+  const aporte = useMemo(() => foco ? aporteAncestros(focoId, byId) : new Map(), [focoId, byId, foco]);
 
   if (!foco) return <Modal title="🌳 Árbol" onClose={onClose}><p className="text-sm text-gray-500 text-center py-6">No se encontró este gallo.</p></Modal>;
 
@@ -912,9 +960,9 @@ const PedigriModal = ({ gallos, initialFocusId, onClose }) => {
 
       {tab === 'pedigri' && (
         <div>
-          {!(comp.length === 1 && comp[0].linea.indexOf('Sangre de ') === 0) && (
+          {!(comp.length === 1 && comp[0].key === foco.id) && (
             <div className="bg-white border border-gray-200 rounded-xl p-3 mb-3">
-              <p className="text-xs font-bold text-gray-600 mb-1.5">🩸 Sangre</p>
+              <p className="text-xs font-bold text-gray-600 mb-1.5">🩸 De quién viene su sangre</p>
               <BarraSangre comp={comp} />
             </div>
           )}
@@ -947,7 +995,7 @@ const PedigriModal = ({ gallos, initialFocusId, onClose }) => {
           </div>
           {repetidos.length > 0 && (
             <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5 mt-2">
-              Consanguinidad: {repetidos.map(g => `${nombreGallo(g)} sale ${veces.get(g.id)} veces`).join(' · ')}
+              Se repite: {repetidos.map(g => `${nombreGallo(g)} sale ${veces.get(g.id)} veces (${pedPct(aporte.get(g.id) || 0)} de su sangre)`).join(' · ')}
             </p>
           )}
           <p className="text-[11px] text-gray-400 mt-2">Toca cualquier tarjeta para ver el árbol de ese gallo. El % es la sangre que aporta.</p>
@@ -1521,7 +1569,7 @@ const FT_TRAIT_OPTS = (() => {
 })();
 
 const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
-  const machos = useMemo(() => gallos.filter(g => g.sexo !== 'Gallina'), [gallos]);
+  const machos = useMemo(() => gallos.filter(g => g.sexo === 'Gallo'), [gallos]);
   const hembras = useMemo(() => gallos.filter(g => g.sexo === 'Gallina'), [gallos]);
   const [objetivoId, setObjetivoId] = useState((machos[0] && machos[0].id) || (gallos[0] && gallos[0].id) || null);
   const [baseId, setBaseId] = useState('');
@@ -1758,24 +1806,208 @@ const PrediccionCard = ({ prediccion }) => {
   );
 };
 
+// ---------- Fechas locales (sin desfase de zona horaria) ----------
+const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const hoyStr = () => ymd(new Date());
+const parseF = (s) => { const a = String(s).slice(0, 10).split('-').map(Number); return new Date(a[0], a[1] - 1, a[2]); };
+const fmtF = (s) => s ? parseF(s).toLocaleDateString('es-PR', { day: 'numeric', month: 'short' }) : '';
+const sumarDias = (s, n) => { const d = parseF(s); d.setDate(d.getDate() + n); return ymd(d); };
+const diasEntre = (a, b) => Math.round((parseF(b) - parseF(a)) / 86400000);
+const DIAS_INCUBACION = 21;
+
+const EV_META = {
+  echada:     { icon: '❤️', label: 'Le echó el gallo', color: '#dc2626' },
+  huevo:      { icon: '🥚', label: 'Puso huevo', color: '#f59e0b' },
+  empollar:   { icon: '🪺', label: 'Se echó a empollar', color: '#3b82f6' },
+  nacimiento: { icon: '🐣', label: 'Nacieron pollos', color: '#16a34a' },
+  pinchado:   { icon: '🏷️', label: 'Pinchados', color: '#9333ea' },
+  nota:       { icon: '📝', label: 'Nota', color: '#6b7280' },
+  fallido:    { icon: '✖️', label: 'Se perdió', color: '#991b1b' },
+  esperada:   { icon: '⏳', label: 'Nacimiento esperado', color: '#16a34a' },
+};
+
+// Resume en qué va una casta a partir de sus eventos
+const resumenCasta = (cruce, evs, pollos) => {
+  const de = (t) => evs.filter(e => e.tipo === t);
+  const suma = (t) => de(t).reduce((s, e) => s + (e.cantidad || 0), 0);
+  const huevos = suma('huevo');
+  const fHuevos = de('huevo').map(e => e.fecha).sort();
+  const empolle = (de('empollar').map(e => e.fecha).sort()[0]) || null;
+  const nacidos = suma('nacimiento');
+  const fNac = (de('nacimiento').map(e => e.fecha).sort()[0]) || null;
+  const fallido = de('fallido').length > 0;
+  const esperada = empolle && !fNac && !fallido ? sumarDias(empolle, DIAS_INCUBACION) : null;
+  const pinchados = pollos.filter(g => g.numero_pinches).length;
+  const hoy = hoyStr();
+  let fase, cls;
+  if (cruce.estado === 'Cerrado') { fase = 'Cerrada'; cls = 'bg-gray-100 text-gray-600'; }
+  else if (fallido) { fase = 'Se perdió'; cls = 'bg-red-100 text-red-700'; }
+  else if (fNac) { fase = `${nacidos || pollos.length} pollos`; cls = 'bg-green-100 text-green-700'; }
+  else if (empolle) {
+    const d = diasEntre(empolle, hoy) + 1;
+    fase = d > DIAS_INCUBACION ? `Empollando · pasada ${d - DIAS_INCUBACION} d` : `Empollando · día ${Math.max(1, d)}`;
+    cls = 'bg-blue-100 text-blue-700';
+  }
+  else if (huevos > 0) { fase = `Poniendo · ${huevos} huevos`; cls = 'bg-yellow-100 text-yellow-700'; }
+  else { fase = 'Echada'; cls = 'bg-pink-100 text-pink-700'; }
+  const estado = fallido ? 'Fallido' : fNac ? 'Eclosionado' : empolle ? 'Empollando' : 'Activo';
+  return { huevos, fHuevos, empolle, nacidos, fNac, fallido, esperada, pinchados, fase, cls, estado, faltan: esperada ? diasEntre(hoy, esperada) : null };
+};
+
+// Sangre de la cría + ancestros que salen por los dos lados
+const SangreCriaCard = ({ padre, madre, gallos }) => {
+  const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
+  const comp = useMemo(() => sangreCria(padre.id, madre.id, byId), [padre, madre, byId]);
+  const rep = useMemo(() => repetidosAmbosLados(padre, madre, gallos, byId), [padre, madre, gallos, byId]);
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-3 mb-3">
+      <p className="text-sm font-bold text-gray-700">🩸 De quién viene la cría</p>
+      <p className="text-[11px] text-gray-400 mb-2">Viene de la descendencia de estos gallos y gallinas:</p>
+      <BarraSangre comp={comp} />
+      {rep.length > 0 ? (
+        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+          <p className="text-xs font-bold text-amber-800 mb-1">🔁 Se repiten por los dos lados</p>
+          <div className="space-y-1.5">
+            {rep.map(r => (
+              <div key={r.g.id} className="text-xs text-amber-900">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold truncate">{sexoIcon(r.g)} {nombreGallo(r.g)}</span>
+                  <b className="ml-2 flex-shrink-0">{pedPct(r.total)} de la cría</b>
+                </div>
+                <p className="text-[11px] text-amber-700">
+                  {r.g.id === padre.id ? 'Es el mismo padre' : pedPct(r.porPadre) + ' del padre'} · {r.g.id === madre.id ? 'es la misma madre' : pedPct(r.porMadre) + ' de la madre'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-[11px] text-green-700 bg-green-50 rounded-lg px-2.5 py-1.5">Ningún gallo ni gallina se repite por los dos lados.</p>
+      )}
+    </div>
+  );
+};
+
+// Calendario del castadero
+const CalendarioCastas = ({ cruces, eventos, gallos, onOpen }) => {
+  const hoy = hoyStr();
+  const [mes, setMes] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [dia, setDia] = useState(hoy);
+  const titulo = (c) => { const p = gallos.find(g => g.id === c.padre_id), m = gallos.find(g => g.id === c.madre_id); return nombreGallo(p) + ' × ' + nombreGallo(m); };
+
+  const marcas = useMemo(() => {
+    const map = {};
+    const add = (fecha, tipo, cruce, ev) => { if (!fecha) return; const k = String(fecha).slice(0, 10); (map[k] = map[k] || []).push({ tipo, cruce, ev }); };
+    cruces.forEach(c => {
+      add(c.fecha_cruce, 'echada', c, null);
+      const evs = eventos.filter(e => e.cruce_id === c.id);
+      evs.forEach(e => add(e.fecha, e.tipo, c, e));
+      const r = resumenCasta(c, evs, []);
+      if (r.esperada && c.estado !== 'Cerrado') add(r.esperada, 'esperada', c, null);
+    });
+    return map;
+  }, [cruces, eventos]);
+
+  const primero = new Date(mes.y, mes.m, 1);
+  const nDias = new Date(mes.y, mes.m + 1, 0).getDate();
+  const celdas = [];
+  for (let i = 0; i < primero.getDay(); i++) celdas.push(null);
+  for (let d = 1; d <= nDias; d++) celdas.push(ymd(new Date(mes.y, mes.m, d)));
+  const mover = (n) => setMes(x => { const d = new Date(x.y, x.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const proximos = Object.keys(marcas).filter(k => k >= hoy).sort()
+    .flatMap(k => marcas[k].filter(x => x.tipo === 'esperada').map(x => ({ fecha: k, cruce: x.cruce }))).slice(0, 5);
+  const delDia = marcas[dia] || [];
+
+  return (
+    <div>
+      {proximos.length > 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-3">
+          <p className="text-xs font-bold text-green-800 mb-1">⏳ Lo que viene</p>
+          {proximos.map((x, i) => {
+            const f = diasEntre(hoy, x.fecha);
+            return (
+              <button key={i} onClick={() => onOpen(x.cruce.id)} className="w-full flex items-center justify-between text-xs text-green-900 py-0.5 text-left">
+                <span className="truncate">🐣 {titulo(x.cruce)}</span>
+                <b className="ml-2 flex-shrink-0">{fmtF(x.fecha)} · {f === 0 ? 'hoy' : f === 1 ? 'mañana' : `faltan ${f} días`}</b>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={() => mover(-1)} className="w-8 h-8 rounded-full bg-gray-100 text-gray-600">‹</button>
+          <p className="text-sm font-bold text-gray-800 first-letter:uppercase">{primero.toLocaleDateString('es-PR', { month: 'long', year: 'numeric' })}</p>
+          <button onClick={() => mover(1)} className="w-8 h-8 rounded-full bg-gray-100 text-gray-600">›</button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => <div key={i} className="text-[10px] font-bold text-gray-400 py-1">{d}</div>)}
+          {celdas.map((k, i) => {
+            if (!k) return <div key={i} />;
+            const ms = marcas[k] || [];
+            const tipos = [...new Set(ms.map(x => x.tipo))].slice(0, 4);
+            return (
+              <button key={i} onClick={() => setDia(k)}
+                className={`rounded-lg py-1 min-h-[44px] flex flex-col items-center ${k === dia ? 'bg-red-50 ring-2 ring-red-400' : ms.length ? 'bg-gray-50' : ''}`}>
+                <span className={`text-xs leading-5 w-5 h-5 rounded-full ${k === hoy ? 'bg-red-600 text-white font-bold' : 'text-gray-700'}`}>{parseF(k).getDate()}</span>
+                <span className="flex gap-0.5 mt-1 h-2">
+                  {tipos.map(t => <span key={t} className="w-1.5 h-1.5 rounded-full" style={t === 'esperada' ? { border: '1.5px solid ' + EV_META[t].color } : { background: EV_META[t].color }} />)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px] text-gray-500">
+          {['echada', 'huevo', 'empollar', 'nacimiento', 'esperada'].map(t => (
+            <span key={t} className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full" style={t === 'esperada' ? { border: '1.5px solid ' + EV_META[t].color } : { background: EV_META[t].color }} />{EV_META[t].label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-xs font-bold text-gray-600 mb-1.5 first-letter:uppercase">{parseF(dia).toLocaleDateString('es-PR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        {delDia.length === 0
+          ? <p className="text-sm text-gray-400 text-center py-4">Nada anotado este día.</p>
+          : <div className="space-y-1.5">
+              {delDia.map((x, i) => (
+                <button key={i} onClick={() => onOpen(x.cruce.id)} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-left active:bg-gray-50">
+                  <p className="text-sm font-semibold text-gray-800">{EV_META[x.tipo].icon} {EV_META[x.tipo].label}{x.ev && x.ev.cantidad ? ` · ${x.ev.cantidad}` : ''}</p>
+                  <p className="text-[11px] text-gray-500 truncate">{titulo(x.cruce)}{x.ev && x.ev.nota ? ' — ' + x.ev.nota : ''}</p>
+                </button>
+              ))}
+            </div>}
+      </div>
+    </div>
+  );
+};
+
 const CastaderoModule = () => {
   const { gallos, loadGallos, toast, activeOwnerId, canEdit } = useContext(AppContext);
+  const [vista, setVista] = useState('planificar');
   const [padre, setPadre] = useState(null);
   const [madre, setMadre] = useState(null);
   const [cruces, setCruces] = useState([]);
+  const [eventos, setEventos] = useState([]);
   const [showGuardar, setShowGuardar] = useState(false);
-  const [detalle, setDetalle] = useState(null);
+  const [detalleId, setDetalleId] = useState(null);
   const [arbolGallo, setArbolGallo] = useState(null);
   const [showAnalisis, setShowAnalisis] = useState(false);
   const [showAsesor, setShowAsesor] = useState(false);
-  const [fechaCruce, setFechaCruce] = useState(new Date().toISOString().slice(0, 10));
+  const [fechaCruce, setFechaCruce] = useState(hoyStr());
   const [notas, setNotas] = useState('');
 
   const consang = useMemo(() => (padre && madre) ? analizarConsanguinidad(padre, madre, gallos, cruces, 6) : null, [padre, madre, gallos, cruces]);
 
   const loadCruces = useCallback(async () => {
-    const { data } = await supabase.from('cruces').select('*').eq('user_id', activeOwnerId).order('fecha_cruce', { ascending: false });
-    setCruces(data || []);
+    const [c, e] = await Promise.all([
+      supabase.from('cruces').select('*').eq('user_id', activeOwnerId).order('fecha_cruce', { ascending: false }),
+      supabase.from('cruce_eventos').select('*').eq('user_id', activeOwnerId).order('fecha', { ascending: true }),
+    ]);
+    setCruces(c.data || []);
+    setEventos(e.data || []);
   }, [activeOwnerId]);
   useEffect(() => { loadCruces(); }, [loadCruces]);
 
@@ -1795,15 +2027,23 @@ const CastaderoModule = () => {
     toast('Casta guardada ✓');
     setShowGuardar(false); setNotas('');
     setPadre(null); setMadre(null);
+    setVista('castas');
     loadCruces();
   };
 
+  const detalle = detalleId ? cruces.find(c => c.id === detalleId) : null;
+  const activas = cruces.filter(c => !['Cerrado', 'Fallido'].includes(c.estado)).length;
+  const VistaBtn = ({ id, children }) => (
+    <button onClick={() => setVista(id)}
+      className={`flex-1 px-2 py-2 rounded-md text-xs font-semibold ${vista === id ? 'bg-white shadow text-red-700' : 'text-gray-500'}`}>{children}</button>
+  );
+
   return (
     <div className="fade-in">
-      <div className="mb-4 flex items-start justify-between gap-2">
+      <div className="mb-3 flex items-start justify-between gap-2">
         <div>
           <h2 className="text-xl font-bold text-gray-800">Castadero</h2>
-          <p className="text-sm text-gray-500">Cruza un gallo con una gallina y estima la cría</p>
+          <p className="text-sm text-gray-500">{activas > 0 ? `${activas} casta${activas === 1 ? '' : 's'} en proceso` : 'Planifica y dale seguimiento a tus castas'}</p>
         </div>
         <button onClick={() => setShowAsesor(true)}
           className="bg-gray-800 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-gray-900 flex-shrink-0">
@@ -1811,100 +2051,111 @@ const CastaderoModule = () => {
         </button>
       </div>
 
-      {/* Selección de la pareja */}
-      <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4">
-        <div className="grid grid-cols-1 gap-3">
-          <div>
-            <p className="text-xs font-semibold text-blue-600 mb-1">♂ Gallo (padre)</p>
-            <GalloSearch gallos={gallos} selected={padre} onSelect={setPadre} onClear={() => setPadre(null)}
-              placeholder="Buscar gallo..." filter={g => g.sexo !== 'Gallina'} />
-          </div>
-          <div className="text-center text-gray-300 text-xl leading-none">✕</div>
-          <div>
-            <p className="text-xs font-semibold text-pink-600 mb-1">♀ Gallina (madre)</p>
-            <GalloSearch gallos={gallos} selected={madre} onSelect={setMadre} onClear={() => setMadre(null)}
-              placeholder="Buscar gallina..." filter={g => g.sexo === 'Gallina'} />
-          </div>
-        </div>
+      <div className="flex rounded-lg bg-gray-200 p-0.5 mb-4">
+        <VistaBtn id="planificar">🧬 Planificar</VistaBtn>
+        <VistaBtn id="castas">📋 Castas ({cruces.length})</VistaBtn>
+        <VistaBtn id="calendario">📅 Calendario</VistaBtn>
       </div>
 
-      {/* Predicción */}
-      {padre && madre ? (
-        <>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-bold text-gray-700">🔮 Predicción de la cría</h3>
-            {canEdit && (
-              <button onClick={() => setShowGuardar(true)}
-                className="bg-red-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-red-700">
-                + Guardar esta casta
-              </button>
-            )}
+      {vista === 'planificar' && (
+        <div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4">
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <p className="text-xs font-semibold text-blue-600 mb-1">♂ Gallo (padre)</p>
+                <GalloSearch gallos={gallos} selected={padre} onSelect={setPadre} onClear={() => setPadre(null)}
+                  placeholder="Buscar gallo..." filter={g => g.sexo === 'Gallo'} />
+              </div>
+              <div className="text-center text-gray-300 text-xl leading-none">✕</div>
+              <div>
+                <p className="text-xs font-semibold text-pink-600 mb-1">♀ Gallina (madre)</p>
+                <GalloSearch gallos={gallos} selected={madre} onSelect={setMadre} onClear={() => setMadre(null)}
+                  placeholder="Buscar gallina..." filter={g => g.sexo === 'Gallina'} />
+              </div>
+            </div>
           </div>
 
-          {/* Consanguinidad / line breeding */}
-          {consang && (
-            <button onClick={() => setShowAnalisis(true)}
-              className={`w-full text-left rounded-xl p-3 mb-3 border ${interpretarF(consang.F).cls} border-transparent hover:opacity-90`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-wide">🔬 Consanguinidad ~{(consang.F * 100).toFixed(1)}%</p>
-                  <p className="text-[11px] opacity-80 truncate">
-                    {consang.commons.length === 0
-                      ? 'Cruce abierto · sin ancestros en común'
-                      : `${consang.commons.length} ancestro(s) en común · ${consang.commons.slice(0, 3).map(c => c.combos[0].nota).join(', ')}${consang.commons.length > 3 ? '…' : ''}`}
-                  </p>
-                </div>
-                <span className="text-xs font-semibold underline ml-2 flex-shrink-0">Ver árboles ▸</span>
-              </div>
-            </button>
-          )}
+          {padre && madre ? (
+            <>
+              {canEdit && (
+                <button onClick={() => setShowGuardar(true)}
+                  className="w-full bg-red-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-red-700 mb-3">
+                  ❤️ Echar a castar
+                </button>
+              )}
 
-          <PrediccionCard prediccion={prediccion} />
-        </>
-      ) : (
-        <div className="text-center text-gray-400 py-8 text-sm">
-          Selecciona un gallo y una gallina para ver los porcentajes estimados de la cría.
+              <SangreCriaCard padre={padre} madre={madre} gallos={gallos} />
+
+              {consang && (
+                <button onClick={() => setShowAnalisis(true)}
+                  className={`w-full text-left rounded-xl p-3 mb-3 border ${interpretarF(consang.F).cls} border-transparent hover:opacity-90`}>
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-wide">🔬 Consanguinidad ~{(consang.F * 100).toFixed(1)}% · {interpretarF(consang.F).txt}</p>
+                      <p className="text-[11px] opacity-80 truncate">{interpretarF(consang.F).hint}</p>
+                    </div>
+                    <span className="text-xs font-semibold underline ml-2 flex-shrink-0">Ver árboles ▸</span>
+                  </div>
+                </button>
+              )}
+
+              <h3 className="text-sm font-bold text-gray-700 mb-2">🔮 Cómo puede salir la cría</h3>
+              <PrediccionCard prediccion={prediccion} />
+            </>
+          ) : (
+            <div className="text-center text-gray-400 py-8 text-sm">
+              Escoge un gallo y una gallina para ver de quién viene la cría y cómo puede salir.
+            </div>
+          )}
         </div>
       )}
 
-      {/* Historial de castas */}
-      <div className="mt-8">
-        <h3 className="text-sm font-bold text-gray-700 mb-2">📋 Castas registradas ({cruces.length})</h3>
-        {cruces.length === 0 ? (
-          <p className="text-center text-gray-400 py-6 text-sm">Todavía no has guardado ninguna casta.</p>
+      {vista === 'castas' && (
+        cruces.length === 0 ? (
+          <div className="text-center py-10">
+            <p className="text-gray-400 text-sm mb-3">Todavía no has echado ninguna casta.</p>
+            <button onClick={() => setVista('planificar')} className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">Planificar una casta</button>
+          </div>
         ) : (
           <div className="space-y-2">
             {cruces.map(c => {
               const p = gallos.find(g => g.id === c.padre_id);
               const m = gallos.find(g => g.id === c.madre_id);
               const pollos = gallos.filter(g => g.cruce_id === c.id);
-              const estadoColor = {
-                Activo: 'bg-blue-100 text-blue-700', Empollando: 'bg-yellow-100 text-yellow-700',
-                Eclosionado: 'bg-green-100 text-green-700', Fallido: 'bg-red-100 text-red-700', Cerrado: 'bg-gray-100 text-gray-600',
-              }[c.estado] || 'bg-gray-100 text-gray-600';
+              const r = resumenCasta(c, eventos.filter(e => e.cruce_id === c.id), pollos);
               return (
-                <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-3 active:bg-gray-50 cursor-pointer" onClick={() => setDetalle(c)}>
-                  <div className="flex items-center justify-between">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-gray-800 truncate">
-                        <span className="text-blue-600">♂ {nombreGallo(p)}</span>
-                        <span className="text-gray-300"> × </span>
-                        <span className="text-pink-600">♀ {nombreGallo(m)}</span>
-                      </p>
-                      <p className="text-[11px] text-gray-500">{c.fecha_cruce}{c.numero_huevos ? ` • ${c.numero_huevos} huevos` : ''}{pollos.length ? ` • ${pollos.length} pinches` : ''}</p>
-                    </div>
-                    <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${estadoColor}`}>{c.estado}</span>
+                <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-3 active:bg-gray-50 cursor-pointer" onClick={() => setDetalleId(c.id)}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-bold text-gray-800 min-w-0">
+                      <span className="text-blue-600">♂ {nombreGallo(p)}</span>
+                      <span className="text-gray-300"> × </span>
+                      <span className="text-pink-600">♀ {nombreGallo(m)}</span>
+                    </p>
+                    <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${r.cls}`}>{r.fase}</span>
                   </div>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    ❤️ {fmtF(c.fecha_cruce)}
+                    {r.huevos > 0 ? ` · 🥚 ${r.huevos}` : ''}
+                    {r.empolle ? ` · 🪺 ${fmtF(r.empolle)}` : ''}
+                    {r.fNac ? ` · 🐣 ${fmtF(r.fNac)}` : ''}
+                    {pollos.length > 0 ? ` · ${r.pinchados}/${pollos.length} pinchados` : ''}
+                  </p>
+                  {r.esperada && (
+                    <p className="text-[11px] font-semibold text-green-700 mt-0.5">
+                      ⏳ Nacen el {fmtF(r.esperada)} · {r.faltan > 0 ? `faltan ${r.faltan} día${r.faltan === 1 ? '' : 's'}` : r.faltan === 0 ? 'hoy' : `hace ${-r.faltan} día${r.faltan === -1 ? '' : 's'}`}
+                    </p>
+                  )}
                 </div>
               );
             })}
           </div>
-        )}
-      </div>
+        )
+      )}
 
-      {/* Modal guardar casta */}
+      {vista === 'calendario' && <CalendarioCastas cruces={cruces} eventos={eventos} gallos={gallos} onOpen={setDetalleId} />}
+
       {showGuardar && (
-        <Modal title="Guardar casta" onClose={() => setShowGuardar(false)}>
+        <Modal title="Echar a castar" onClose={() => setShowGuardar(false)}>
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               <span className="text-blue-600 font-semibold">♂ {nombreGallo(padre)}</span> × <span className="text-pink-600 font-semibold">♀ {nombreGallo(madre)}</span>
@@ -1922,12 +2173,12 @@ const CastaderoModule = () => {
         </Modal>
       )}
 
-      {/* Modal detalle de casta */}
       {detalle && (
         <DetalleCastaModal
           cruce={detalle}
           gallos={gallos}
-          onClose={() => setDetalle(null)}
+          eventos={eventos.filter(e => e.cruce_id === detalle.id)}
+          onClose={() => setDetalleId(null)}
           onReload={() => { loadCruces(); loadGallos(); }}
           onVerArbol={g => setArbolGallo(g)}
           canEdit={canEdit}
@@ -1944,153 +2195,260 @@ const CastaderoModule = () => {
 
       {showAsesor && (
         <AsesorCrucesModal gallos={gallos} cruces={cruces}
-          onUsar={(g, h) => { setPadre(g); setMadre(h); }}
+          onUsar={(g, h) => { setPadre(g); setMadre(h); setVista('planificar'); }}
           onClose={() => setShowAsesor(false)} />
       )}
     </div>
   );
 };
 
-// Detalle de una casta: resultados (huevos/eclosión) + registro de pinches
-const DetalleCastaModal = ({ cruce, gallos, onClose, onReload, onVerArbol, canEdit, toast, activeOwnerId }) => {
+// Un pollo de la casta: se le pone pinche, sexo y color cuando se sepa
+const PolloRow = ({ g, canEdit, onSaved, onVerArbol, toast }) => {
+  const [edit, setEdit] = useState(false);
+  const [f, setF] = useState({ nombre: g.nombre || '', numero_pinches: g.numero_pinches == null ? '' : String(g.numero_pinches), sexo: g.sexo, color: g.color || '' });
+  const save = async () => {
+    if (!f.nombre.trim() && !f.numero_pinches) { toast('Pon nombre o # de pinche', 'error'); return; }
+    const { error } = await supabase.from('gallos').update({
+      nombre: f.nombre.trim() || null,
+      numero_pinches: f.numero_pinches === '' ? null : parseInt(f.numero_pinches, 10),
+      sexo: f.sexo,
+      color: f.color.trim() || null,
+    }).eq('id', g.id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    toast('Guardado ✓'); setEdit(false); onSaved();
+  };
+  if (edit) return (
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="# Pinche"><Input type="number" inputMode="numeric" value={f.numero_pinches} onChange={e => setF({ ...f, numero_pinches: e.target.value })} /></Field>
+        <Field label="Sexo"><Select value={f.sexo} onChange={e => setF({ ...f, sexo: e.target.value })} options={['Pollo', 'Gallo', 'Gallina']} /></Field>
+        <Field label="Nombre"><Input value={f.nombre} onChange={e => setF({ ...f, nombre: e.target.value })} /></Field>
+        <Field label="Color"><Input value={f.color} onChange={e => setF({ ...f, color: e.target.value })} placeholder="ej: Giro" /></Field>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => setEdit(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-semibold">Cancelar</button>
+        <button onClick={save} className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm font-semibold">Guardar</button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={g.sexo === 'Gallina' ? 'text-pink-500' : g.sexo === 'Gallo' ? 'text-blue-500' : ''}>{sexoIcon(g)}</span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">{nombreGallo(g)}</p>
+          <p className="text-[11px] text-gray-400 truncate">
+            {g.numero_pinches ? '#' + g.numero_pinches : 'sin pinche'} · {g.sexo === 'Pollo' ? 'sexo por definir' : g.sexo}{g.color ? ' · ' + g.color : ''}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {canEdit && <button onClick={() => setEdit(true)} className="text-xs font-semibold text-red-600 px-2 py-1">Editar</button>}
+        <button onClick={() => onVerArbol(g)} className="text-lg" title="Ver árbol">🌳</button>
+      </div>
+    </div>
+  );
+};
+
+// Detalle de una casta: línea de tiempo, registro rápido y pollos
+const DetalleCastaModal = ({ cruce, gallos, eventos, onClose, onReload, onVerArbol, canEdit, toast, activeOwnerId }) => {
   const p = gallos.find(g => g.id === cruce.padre_id);
   const m = gallos.find(g => g.id === cruce.madre_id);
   const pollos = gallos.filter(g => g.cruce_id === cruce.id);
+  const evs = eventos;
+  const r = resumenCasta(cruce, evs, pollos);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const abrir = (tipo) => setForm({ tipo, fecha: hoyStr(), cantidad: tipo === 'huevo' ? '1' : '', nota: '' });
 
-  const [form, setForm] = useState({
-    estado: cruce.estado || 'Activo',
-    numero_huevos: cruce.numero_huevos ?? '',
-    huevos_eclosionados: cruce.huevos_eclosionados ?? '',
-    num_pollos: cruce.num_pollos ?? '',
-    num_machos: cruce.num_machos ?? '',
-    num_hembras: cruce.num_hembras ?? '',
-    notas: cruce.notas || '',
-  });
-  const [showPinche, setShowPinche] = useState(false);
-  const [pinche, setPinche] = useState({ nombre: '', numero_pinches: '', sexo: 'Gallo', color: '' });
-
-  const guardarResultados = async () => {
-    const num = (v) => (v === '' || v === null ? null : parseInt(v, 10));
-    const { error } = await supabase.from('cruces').update({
-      estado: form.estado,
-      numero_huevos: num(form.numero_huevos),
-      huevos_eclosionados: num(form.huevos_eclosionados),
-      num_pollos: num(form.num_pollos),
-      num_machos: num(form.num_machos),
-      num_hembras: num(form.num_hembras),
-      notas: form.notas || null,
+  // Mantiene el resumen de la casta al día con lo anotado
+  const sync = async (lista) => {
+    const t = resumenCasta(cruce, lista, pollos);
+    await supabase.from('cruces').update({
+      estado: cruce.estado === 'Cerrado' ? 'Cerrado' : t.estado,
+      numero_huevos: t.huevos || null,
+      huevos_eclosionados: t.nacidos || null,
+      num_pollos: t.nacidos || null,
     }).eq('id', cruce.id);
-    if (error) { toast('Error: ' + error.message, 'error'); return; }
-    toast('Resultados guardados ✓');
-    onReload();
-    onClose();
   };
 
-  const agregarPinche = async () => {
-    if (!pinche.nombre.trim() && !pinche.numero_pinches) { toast('Pon nombre o # de pinches', 'error'); return; }
-    const { error } = await supabase.from('gallos').insert({
+  const crearPollos = async (n, fecha) => {
+    const base = pollos.length;
+    const filas = [];
+    for (let i = 1; i <= n; i++) filas.push({
       user_id: activeOwnerId,
-      nombre: pinche.nombre.trim() || null,
-      numero_pinches: pinche.numero_pinches ? parseInt(pinche.numero_pinches, 10) : null,
-      sexo: pinche.sexo,
-      color: pinche.color || null,
-      linea_genetica: p?.linea_genetica || m?.linea_genetica || null,
+      nombre: ('Pollo ' + (base + i) + ' de ' + nombreGallo(m)).slice(0, 250),
+      sexo: 'Pollo',
+      fecha_nacimiento: fecha,
       padre_id: cruce.padre_id,
       madre_id: cruce.madre_id,
       cruce_id: cruce.id,
     });
-    if (error) { toast('Error: ' + error.message, 'error'); return; }
-    toast('Pinche añadido ✓');
-    setPinche({ nombre: '', numero_pinches: '', sexo: 'Gallo', color: '' });
-    setShowPinche(false);
-    onReload();
+    return supabase.from('gallos').insert(filas);
   };
 
+  const guardarEvento = async () => {
+    const cant = form.cantidad === '' ? null : parseInt(form.cantidad, 10);
+    if ((form.tipo === 'huevo' || form.tipo === 'nacimiento') && !(cant > 0)) { toast(form.tipo === 'huevo' ? 'Pon cuántos huevos' : 'Pon cuántos pollos nacieron', 'error'); return; }
+    if (form.tipo === 'nota' && !form.nota.trim()) { toast('Escribe la nota', 'error'); return; }
+    if (!form.fecha) { toast('Pon la fecha', 'error'); return; }
+    setSaving(true);
+    if (form.tipo === 'nacimiento') {
+      const { error: e1 } = await crearPollos(cant, form.fecha);
+      if (e1) {
+        toast(/sexo_check/.test(e1.message) ? 'Falta correr el script de base de datos para pollos sin sexo. No se guardó nada.' : 'Error al crear los pollos: ' + e1.message, 'error');
+        setSaving(false); return;
+      }
+    }
+    const nuevo = { cruce_id: cruce.id, user_id: activeOwnerId, fecha: form.fecha, tipo: form.tipo, cantidad: cant, nota: form.nota.trim() || null };
+    const { error } = await supabase.from('cruce_eventos').insert(nuevo);
+    if (error) { toast('Error: ' + error.message, 'error'); setSaving(false); return; }
+    await sync(evs.concat([nuevo]));
+    toast(form.tipo === 'nacimiento' ? `${cant} pollos creados ✓` : 'Anotado ✓');
+    setForm(null); setSaving(false); onReload();
+  };
+
+  const borrarEvento = async (ev) => {
+    if (!confirm('¿Borrar "' + EV_META[ev.tipo].label + '" del ' + fmtF(ev.fecha) + '?' + (ev.tipo === 'nacimiento' ? '\n\nLos pollos ya creados NO se borran.' : ''))) return;
+    const { error } = await supabase.from('cruce_eventos').delete().eq('id', ev.id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    await sync(evs.filter(e => e.id !== ev.id));
+    toast('Borrado'); onReload();
+  };
+
+  const agregarPollo = async () => {
+    const { error } = await crearPollos(1, r.fNac || hoyStr());
+    if (error) { toast(/sexo_check/.test(error.message) ? 'Falta correr el script de base de datos para pollos sin sexo.' : 'Error: ' + error.message, 'error'); return; }
+    toast('Pollo añadido ✓'); onReload();
+  };
+
+  const cerrar = async (estado) => {
+    const { error } = await supabase.from('cruces').update({ estado }).eq('id', cruce.id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    toast(estado === 'Cerrado' ? 'Casta cerrada' : 'Casta reabierta'); onReload();
+  };
+
+  const Paso = ({ hecho, actual, titulo, sub }) => (
+    <div className="flex gap-2.5">
+      <div className="flex flex-col items-center">
+        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0 ${hecho ? 'bg-green-500 text-white' : actual ? 'bg-blue-500 text-white' : 'border-2 border-dashed border-gray-300 text-gray-300'}`}>{hecho ? '✓' : actual ? '•' : ''}</span>
+        <span className="w-px flex-1 bg-gray-200 my-0.5" />
+      </div>
+      <div className="pb-3 min-w-0">
+        <p className={`text-sm font-semibold leading-5 ${hecho || actual ? 'text-gray-800' : 'text-gray-400'}`}>{titulo}</p>
+        {sub && <p className={`text-[11px] ${actual ? 'text-blue-600 font-semibold' : 'text-gray-500'}`}>{sub}</p>}
+      </div>
+    </div>
+  );
+  const rangoHuevos = r.fHuevos.length ? (r.fHuevos[0] === r.fHuevos[r.fHuevos.length - 1] ? fmtF(r.fHuevos[0]) : fmtF(r.fHuevos[0]) + ' al ' + fmtF(r.fHuevos[r.fHuevos.length - 1])) : null;
+  const listaEvs = evs.slice().sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+  const tituloForm = form ? { huevo: '🥚 Puso huevo', empollar: '🪺 Se echó a empollar', nacimiento: '🐣 Nacieron pollos', nota: '📝 Nota', fallido: '✖️ Se perdió la casta' }[form.tipo] : '';
+  const AccionBtn = ({ tipo, icon, texto }) => (
+    <button onClick={() => abrir(tipo)} className={`py-2 rounded-lg text-xs font-semibold border ${form && form.tipo === tipo ? 'bg-red-50 border-red-300 text-red-700' : 'bg-white border-gray-200 text-gray-700'}`}>
+      <span className="block text-lg leading-6">{icon}</span>{texto}
+    </button>
+  );
+
   return (
-    <Modal title={`Casta: ${nombreGallo(p)} × ${nombreGallo(m)}`} onClose={onClose} wide>
+    <Modal title={`${nombreGallo(p)} × ${nombreGallo(m)}`} onClose={onClose} wide>
       <div className="space-y-4">
-        <div className="bg-gray-50 rounded-xl p-3 text-sm">
-          <span className="text-blue-600 font-semibold">♂ {nombreGallo(p)}</span>
-          <span className="text-gray-300"> × </span>
-          <span className="text-pink-600 font-semibold">♀ {nombreGallo(m)}</span>
-          <span className="text-gray-400 text-xs"> · {cruce.fecha_cruce}</span>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm min-w-0">
+            <span className="text-blue-600 font-semibold">♂ {nombreGallo(p)}</span>
+            <span className="text-gray-300"> × </span>
+            <span className="text-pink-600 font-semibold">♀ {nombreGallo(m)}</span>
+          </p>
+          <span className={`text-[11px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${r.cls}`}>{r.fase}</span>
         </div>
 
-        {/* Resultados */}
-        <div>
-          <p className="text-xs font-bold text-gray-500 uppercase mb-2">Resultados de la casta</p>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Estado">
-              <Select value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value })}
-                options={['Activo', 'Empollando', 'Eclosionado', 'Fallido', 'Cerrado']} />
-            </Field>
-            <Field label="# Huevos">
-              <Input type="number" value={form.numero_huevos} onChange={e => setForm({ ...form, numero_huevos: e.target.value })} placeholder="ej: 12" />
-            </Field>
-            <Field label="Huevos eclosionados">
-              <Input type="number" value={form.huevos_eclosionados} onChange={e => setForm({ ...form, huevos_eclosionados: e.target.value })} placeholder="ej: 9" />
-            </Field>
-            <Field label="Pollos vivos">
-              <Input type="number" value={form.num_pollos} onChange={e => setForm({ ...form, num_pollos: e.target.value })} placeholder="ej: 8" />
-            </Field>
-            <Field label="Machos">
-              <Input type="number" value={form.num_machos} onChange={e => setForm({ ...form, num_machos: e.target.value })} />
-            </Field>
-            <Field label="Hembras">
-              <Input type="number" value={form.num_hembras} onChange={e => setForm({ ...form, num_hembras: e.target.value })} />
-            </Field>
+        <div className="bg-gray-50 rounded-xl p-3">
+          <Paso hecho titulo="Le echó el gallo" sub={fmtF(cruce.fecha_cruce)} />
+          <Paso hecho={r.huevos > 0} actual={!r.huevos && !r.empolle && !r.fNac && !r.fallido}
+            titulo={r.huevos > 0 ? `Puso ${r.huevos} huevo${r.huevos === 1 ? '' : 's'}` : 'Puso huevos'} sub={rangoHuevos || 'pendiente'} />
+          <Paso hecho={!!r.empolle && !!r.fNac} actual={!!r.empolle && !r.fNac && !r.fallido}
+            titulo="Se echó a empollar" sub={r.empolle ? fmtF(r.empolle) + (!r.fNac && !r.fallido ? ' · ' + r.fase.replace('Empollando · ', '') + ' de ' + DIAS_INCUBACION : '') : 'pendiente'} />
+          <Paso hecho={!!r.fNac} titulo={r.fNac ? `Nacieron ${r.nacidos} pollo${r.nacidos === 1 ? '' : 's'}` : 'Nacen los pollos'}
+            sub={r.fNac ? fmtF(r.fNac) : r.esperada ? `esperado ${fmtF(r.esperada)} · ${r.faltan > 0 ? 'faltan ' + r.faltan + ' días' : r.faltan === 0 ? 'hoy' : 'hace ' + (-r.faltan) + ' días'}` : 'pendiente'} />
+          <div className="flex gap-2.5">
+            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0 ${pollos.length > 0 && r.pinchados === pollos.length ? 'bg-green-500 text-white' : 'border-2 border-dashed border-gray-300 text-gray-300'}`}>{pollos.length > 0 && r.pinchados === pollos.length ? '✓' : ''}</span>
+            <div className="min-w-0">
+              <p className={`text-sm font-semibold leading-5 ${pollos.length > 0 ? 'text-gray-800' : 'text-gray-400'}`}>Pinchados</p>
+              <p className="text-[11px] text-gray-500">{pollos.length > 0 ? `${r.pinchados} de ${pollos.length} con pinche` : 'pendiente'}</p>
+            </div>
           </div>
-          <Field label="Notas">
-            <Textarea value={form.notas} onChange={e => setForm({ ...form, notas: e.target.value })} />
-          </Field>
-          {canEdit && (
-            <button onClick={guardarResultados} className="w-full bg-red-600 text-white py-2.5 rounded-lg font-semibold hover:bg-red-700 mt-1">
-              Guardar resultados
-            </button>
-          )}
+          {r.fallido && <p className="text-xs font-semibold text-red-700 mt-2">✖️ Esta casta se perdió.</p>}
         </div>
 
-        {/* Pinches enlazados */}
-        <div className="border-t border-gray-100 pt-3">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-bold text-gray-500 uppercase">Pinches de esta casta ({pollos.length})</p>
-            {canEdit && (
-              <button onClick={() => setShowPinche(s => !s)} className="text-xs font-semibold text-red-600">
-                {showPinche ? 'Cancelar' : '+ Añadir pinche'}
-              </button>
+        {canEdit && cruce.estado !== 'Cerrado' && (
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase mb-2">Anotar</p>
+            <div className="grid grid-cols-4 gap-2">
+              <AccionBtn tipo="huevo" icon="🥚" texto="Huevo" />
+              <AccionBtn tipo="empollar" icon="🪺" texto="Empollar" />
+              <AccionBtn tipo="nacimiento" icon="🐣" texto="Nacieron" />
+              <AccionBtn tipo="nota" icon="📝" texto="Nota" />
+            </div>
+            {form && (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mt-2 space-y-3">
+                <p className="text-sm font-bold text-gray-800">{tituloForm}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Fecha"><Input type="date" value={form.fecha} onChange={e => setForm({ ...form, fecha: e.target.value })} /></Field>
+                  {form.tipo !== 'nota' && form.tipo !== 'fallido' && (
+                    <Field label={form.tipo === 'huevo' ? '¿Cuántos huevos?' : form.tipo === 'empollar' ? 'Huevos echados (opcional)' : '¿Cuántos pollos?'}>
+                      <Input type="number" inputMode="numeric" min="0" value={form.cantidad} onChange={e => setForm({ ...form, cantidad: e.target.value })} />
+                    </Field>
+                  )}
+                </div>
+                <Field label={form.tipo === 'nota' ? 'Nota' : 'Nota (opcional)'}>
+                  <Textarea rows="2" value={form.nota} onChange={e => setForm({ ...form, nota: e.target.value })} />
+                </Field>
+                {form.tipo === 'nacimiento' && <p className="text-[11px] text-gray-500">Se crean los pollos enlazados a esta casta. Después le pones a cada uno su pinche, sexo y color.</p>}
+                {form.tipo === 'empollar' && <p className="text-[11px] text-gray-500">El nacimiento se calcula para {fmtF(sumarDias(form.fecha || hoyStr(), DIAS_INCUBACION))} ({DIAS_INCUBACION} días).</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => setForm(null)} className="flex-1 bg-gray-200 text-gray-700 py-2.5 rounded-lg text-sm font-semibold">Cancelar</button>
+                  <button onClick={guardarEvento} disabled={saving} className="flex-1 bg-red-600 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50">{saving ? 'Guardando...' : 'Guardar'}</button>
+                </div>
+              </div>
             )}
           </div>
+        )}
 
-          {showPinche && (
-            <div className="bg-gray-50 rounded-xl p-3 mb-3 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Nombre"><Input value={pinche.nombre} onChange={e => setPinche({ ...pinche, nombre: e.target.value })} placeholder="ej: Pinto" /></Field>
-                <Field label="# Pinches"><Input type="number" value={pinche.numero_pinches} onChange={e => setPinche({ ...pinche, numero_pinches: e.target.value })} /></Field>
-                <Field label="Sexo"><Select value={pinche.sexo} onChange={e => setPinche({ ...pinche, sexo: e.target.value })} options={['Gallo', 'Gallina']} /></Field>
-                <Field label="Color"><Input value={pinche.color} onChange={e => setPinche({ ...pinche, color: e.target.value })} placeholder="ej: Giro" /></Field>
-              </div>
-              <p className="text-[11px] text-gray-400">Se creará como gallo con padre <b>{nombreGallo(p)}</b> y madre <b>{nombreGallo(m)}</b>, para seguir su genética.</p>
-              <button onClick={agregarPinche} className="w-full bg-gray-800 text-white py-2 rounded-lg font-semibold text-sm">Crear pinche</button>
-            </div>
-          )}
-
-          {pollos.length === 0 ? (
-            <p className="text-center text-gray-400 py-3 text-sm">Aún no hay pinches registrados en esta casta.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {pollos.map(g => (
-                <div key={g.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={g.sexo === 'Gallina' ? 'text-pink-500' : 'text-blue-500'}>{sexoIcon(g)}</span>
-                    <span className="text-sm font-medium text-gray-800 truncate">{nombreGallo(g)}</span>
-                    {g.color && <span className="text-[11px] text-gray-400">{g.color}</span>}
-                  </div>
-                  <button onClick={() => onVerArbol(g)} className="text-lg" title="Ver árbol">🌳</button>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="border-t border-gray-100 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-gray-500 uppercase">Pollos de esta casta ({pollos.length})</p>
+            {canEdit && <button onClick={agregarPollo} className="text-xs font-semibold text-red-600">+ Añadir uno</button>}
+          </div>
+          {pollos.length === 0
+            ? <p className="text-center text-gray-400 py-3 text-sm">Cuando nazcan, anótalos con "Nacieron" y se crean aquí.</p>
+            : <div className="space-y-1.5">{pollos.map(g => <PolloRow key={g.id} g={g} canEdit={canEdit} onSaved={onReload} onVerArbol={onVerArbol} toast={toast} />)}</div>}
         </div>
+
+        <div className="border-t border-gray-100 pt-3">
+          <p className="text-xs font-bold text-gray-500 uppercase mb-2">Historial ({listaEvs.length})</p>
+          {listaEvs.length === 0
+            ? <p className="text-center text-gray-400 py-3 text-sm">Todavía no hay nada anotado.</p>
+            : <div className="space-y-1.5">
+                {listaEvs.map(ev => (
+                  <div key={ev.id || ev.fecha + ev.tipo} className="flex items-start justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-800">{EV_META[ev.tipo].icon} {EV_META[ev.tipo].label}{ev.cantidad ? ` · ${ev.cantidad}` : ''}</p>
+                      <p className="text-[11px] text-gray-500">{fmtF(ev.fecha)}{ev.nota ? ' — ' + ev.nota : ''}</p>
+                    </div>
+                    {canEdit && ev.id && <button onClick={() => borrarEvento(ev)} className="text-gray-300 hover:text-red-500 text-sm ml-2 flex-shrink-0">🗑</button>}
+                  </div>
+                ))}
+              </div>}
+          {cruce.notas && <p className="text-[11px] text-gray-500 mt-2">📝 {cruce.notas}</p>}
+        </div>
+
+        {canEdit && (
+          <div className="flex gap-2">
+            {cruce.estado !== 'Cerrado' && !r.fallido && <button onClick={() => abrir('fallido')} className="flex-1 border border-gray-200 text-gray-500 py-2 rounded-lg text-xs font-semibold">✖️ Se perdió</button>}
+            {cruce.estado === 'Cerrado'
+              ? <button onClick={() => cerrar(r.estado)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-xs font-semibold">Reabrir casta</button>
+              : <button onClick={() => cerrar('Cerrado')} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-xs font-semibold">Cerrar casta</button>}
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -2444,7 +2802,7 @@ const GeneticaModule = () => {
             <div className="grid grid-cols-3 gap-3">
               <Field label="Sexo">
                 <Select value={form.sexo} onChange={e => setForm({...form, sexo: e.target.value})}
-                  options={['Gallo', 'Gallina']} />
+                  options={['Gallo', 'Gallina', 'Pollo']} />
               </Field>
               <Field label="Amarrado">
                 <Select value={form.amarrado ? 'Sí' : 'No'}
@@ -4953,7 +5311,7 @@ const App = ({ user }) => {
       <div className="min-h-screen bg-gray-100 pb-20">
         <div className="bg-red-700 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-md">
           <div>
-            <h1 className="text-lg font-bold leading-tight">🐓 Gallero PR <span className="text-[10px] font-normal text-red-200 align-middle">v3</span></h1>
+            <h1 className="text-lg font-bold leading-tight">🐓 Gallero PR <span className="text-[10px] font-normal text-red-200 align-middle">v4</span></h1>
             {isCollaborator && <p className="text-xs text-red-200">Viendo gallos ajenos ({myRole})</p>}
           </div>
           <div className="flex items-center gap-2">
