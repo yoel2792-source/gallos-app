@@ -3435,7 +3435,7 @@ const PeleasModule = () => {
       moneda: 'USD',
     };
 
-    const dataConUser = { ...data, user_id: activeOwnerId, temporada: getTemporadaActual() };
+    const dataConUser = { ...data, user_id: activeOwnerId, temporada: editingId ? (form.temporada || 1) : getTemporadaActual() };
     let error;
     if (editingId) {
       const { created_at, updated_at, gallos: _g, user_id: _u, ...cleanData } = dataConUser;
@@ -4687,7 +4687,7 @@ const App = ({ user }) => {
     const clean = valor.trim();
     if (!clean) return;
     setOpciones(prev => ({ ...prev, [categoria]: [...(prev[categoria] || []), clean] }));
-    await supabase.from('opciones_dinamicas').insert({ user_id: activeOwnerId, categoria, valor: clean });
+    await supabase.from('opciones_dinamicas').insert({ user_id: activeOwnerId, tipo: categoria, valor: clean });
   }, [activeOwnerId]);
 
   useEffect(() => { loadGallos(); }, [loadGallos]);
@@ -4696,7 +4696,7 @@ const App = ({ user }) => {
     const loadOpciones = async () => {
       const { data } = await supabase.from('opciones_dinamicas').select('*').eq('user_id', activeOwnerId);
       const map = {};
-      (data || []).forEach(({ categoria, valor }) => {
+      (data || []).forEach(({ tipo: categoria, valor }) => {
         if (!map[categoria]) map[categoria] = [];
         map[categoria].push(valor);
       });
