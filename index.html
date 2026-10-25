@@ -186,16 +186,37 @@ const PhotoViewer = ({ src, onClose }) => {
   );
 };
 
+// Lee una foto de cualquier tamaño y la reduce (máx. 1600px, JPEG) para que pese poco al guardarla
+const fotoADataURL = (file, maxLado = 1600, calidad = 0.82) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(reader.error);
+  reader.onload = (ev) => {
+    const original = ev.target.result;
+    const img = new Image();
+    img.onload = () => {
+      const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+      const w = Math.round(img.width * escala), h = Math.round(img.height * escala);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const reducida = canvas.toDataURL('image/jpeg', calidad);
+      resolve(reducida.length < original.length ? reducida : original);
+    };
+    img.onerror = () => resolve(original); // formato que el navegador no puede abrir: se guarda tal cual
+    img.src = original;
+  };
+  reader.readAsDataURL(file);
+});
+
 // Componente para subir una foto (perfil del gallo)
 const PhotoUpload = ({ value, onChange, label }) => {
   const fileRef = useRef();
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { alert('La imagen debe ser menor a 2MB'); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => onChange(ev.target.result);
-    reader.readAsDataURL(file);
+    try { onChange(await fotoADataURL(file)); }
+    catch (_) { alert('No se pudo leer la imagen. Intenta con otra foto.'); }
   };
   return (
     <div>
@@ -219,13 +240,12 @@ const PhotoUpload = ({ value, onChange, label }) => {
 // Componente para subir múltiples fotos (entrenamientos)
 const MultiPhotoUpload = ({ values, onChange, label }) => {
   const fileRef = useRef();
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { alert('La imagen debe ser menor a 2MB'); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => onChange([...(values || []), ev.target.result]);
-    reader.readAsDataURL(file);
+    try { const foto = await fotoADataURL(file); onChange([...(values || []), foto]); }
+    catch (_) { alert('No se pudo leer la imagen. Intenta con otra foto.'); }
   };
   const removeAt = (i) => onChange(values.filter((_, idx) => idx !== i));
   return (
