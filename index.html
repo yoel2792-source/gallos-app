@@ -186,6 +186,17 @@ const PhotoViewer = ({ src, onClose }) => {
   );
 };
 
+// Pinches: se guardan como texto tal cual se escriben (0412 se queda 0412).
+// Para buscar y ordenar, los ceros a la izquierda no cuentan: 412 encuentra 0412 y viceversa.
+const pinSinCeros = (p) => p == null ? '' : String(p).trim().replace(/^0+(?=\d)/, '');
+const coincidePinche = (p, q) => {
+  if (p == null || p === '' || !q) return false;
+  const s = String(p), qq = String(q).trim().replace(/^#/, '');
+  return s.includes(qq) || (/^\d+$/.test(qq) && pinSinCeros(s).includes(pinSinCeros(qq)));
+};
+const pinNum = (p) => { const n = parseInt(pinSinCeros(p), 10); return isNaN(n) ? Infinity : n; };
+const limpiarPinche = (v) => { const t = String(v == null ? '' : v).trim().replace(/^#/, ''); return t === '' ? null : t; };
+
 // Lee una foto de cualquier tamaño y la reduce (máx. 1600px, JPEG) para que pese poco al guardarla
 const fotoADataURL = (file, maxLado = 1600, calidad = 0.82) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -283,7 +294,7 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
     if (filter) list = list.filter(filter);
     return list.filter(g =>
       (g.nombre && g.nombre.toLowerCase().includes(query)) ||
-      (g.numero_pinches && g.numero_pinches.toString().includes(query))
+      coincidePinche(g.numero_pinches, q)
     ).slice(0, 10);
   }, [q, gallos, filter]);
 
@@ -2305,7 +2316,7 @@ const PolloRow = ({ g, canEdit, onSaved, onVerArbol, toast }) => {
     if (!f.nombre.trim() && !f.numero_pinches) { toast('Pon nombre o # de pinche', 'error'); return; }
     const { error } = await supabase.from('gallos').update({
       nombre: f.nombre.trim() || null,
-      numero_pinches: f.numero_pinches === '' ? null : parseInt(f.numero_pinches, 10),
+      numero_pinches: limpiarPinche(f.numero_pinches),
       sexo: f.sexo,
       color: f.color.trim() || null,
     }).eq('id', g.id);
@@ -2315,7 +2326,7 @@ const PolloRow = ({ g, canEdit, onSaved, onVerArbol, toast }) => {
   if (edit) return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <Field label="# Pinche"><Input type="number" inputMode="numeric" value={f.numero_pinches} onChange={e => setF({ ...f, numero_pinches: e.target.value })} /></Field>
+        <Field label="# Pinche"><Input type="text" inputMode="numeric" value={f.numero_pinches} onChange={e => setF({ ...f, numero_pinches: e.target.value })} /></Field>
         <Field label="Sexo"><Select value={f.sexo} onChange={e => setF({ ...f, sexo: e.target.value })} options={['Pollo', 'Gallo', 'Gallina']} /></Field>
         <Field label="Nombre"><Input value={f.nombre} onChange={e => setF({ ...f, nombre: e.target.value })} /></Field>
         <Field label="Color"><Input value={f.color} onChange={e => setF({ ...f, color: e.target.value })} placeholder="ej: Giro" /></Field>
@@ -2598,15 +2609,15 @@ const GeneticaModule = () => {
       (!soloAmarrados || g.amarrado) &&
       (!q ||
         sinAcentos(g.nombre).includes(q) ||
-        (g.numero_pinches != null && String(g.numero_pinches).includes(q)) ||
+        coincidePinche(g.numero_pinches, q) ||
         sinAcentos(g.linea_genetica).includes(q) ||
         sinAcentos(g.color).includes(q) ||
         (g.jaula != null && ('jaula ' + g.jaula) === q))
     );
     L = L.slice();
     if (orden === 'recientes') L.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-    else if (orden === 'pinche') L.sort((a, b) => (a.numero_pinches == null) - (b.numero_pinches == null) || (a.numero_pinches || 0) - (b.numero_pinches || 0));
-    else L.sort((a, b) => !a.nombre - !b.nombre || sinAcentos(a.nombre).localeCompare(sinAcentos(b.nombre)) || (a.numero_pinches || 0) - (b.numero_pinches || 0));
+    else if (orden === 'pinche') L.sort((a, b) => (a.numero_pinches == null) - (b.numero_pinches == null) || (pinNum(a.numero_pinches) - pinNum(b.numero_pinches)) || String(a.numero_pinches || '').localeCompare(String(b.numero_pinches || '')));
+    else L.sort((a, b) => !a.nombre - !b.nombre || sinAcentos(a.nombre).localeCompare(sinAcentos(b.nombre)) || (pinNum(a.numero_pinches) - pinNum(b.numero_pinches)));
     return L;
   }, [gallos, searchQ, filtroSexo, soloAmarrados, orden]);
 
@@ -2629,7 +2640,7 @@ const GeneticaModule = () => {
 
     const data = {
       nombre: form.nombre || null,
-      numero_pinches: form.numero_pinches ? parseInt(form.numero_pinches) : null,
+      numero_pinches: limpiarPinche(form.numero_pinches),
       sexo: form.sexo,
       amarrado: form.amarrado,
       jaula: form.amarrado ? (form.jaula || null) : null,
@@ -2951,7 +2962,7 @@ const GeneticaModule = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <Field label="# Pinches">
-                <Input type="number" placeholder="ej: 22" value={form.numero_pinches}
+                <Input type="text" inputMode="numeric" placeholder="ej: 22 o 0412" value={form.numero_pinches}
                   onChange={e => setForm({...form, numero_pinches: e.target.value})} />
               </Field>
               <Field label="Nombre">

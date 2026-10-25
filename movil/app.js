@@ -92,12 +92,13 @@
       var pin = g.numero_pinches == null ? '' : String(g.numero_pinches);
       var nom = norm(g.nombre);
       var p = -1;
-      if (pin && pin === n) p = 0;
-      else if (pin && esNum && pin.indexOf(n) === 0) p = 1;
+      var pin0 = pin.replace(/^0+(?=\d)/, ''), n0 = n.replace(/^0+(?=\d)/, '');
+      if (pin && (pin === n || (esNum && pin0 === n0))) p = 0;
+      else if (pin && esNum && (pin.indexOf(n) === 0 || pin0.indexOf(n0) === 0)) p = 1;
       else if (nom.indexOf(n) === 0) p = 2;
       else if ((' ' + nom).indexOf(' ' + n) !== -1) p = 3;
       else if (nom.indexOf(n) !== -1) p = 4;
-      else if (pin && esNum && pin.indexOf(n) !== -1) p = 5;
+      else if (pin && esNum && (pin.indexOf(n) !== -1 || pin0.indexOf(n0) !== -1)) p = 5;
       else if (esNum && g.jaula != null && String(g.jaula) === n) p = 6;
       else if (norm(g.color).indexOf(n) !== -1 || norm(g.linea_genetica).indexOf(n) !== -1) p = 7;
       if (p >= 0) out.push({ g: g, p: p });
