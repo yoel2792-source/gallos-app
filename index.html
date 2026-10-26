@@ -2905,7 +2905,10 @@ const GeneticaModule = () => {
 
   const [filtroSexo, setFiltroSexo] = useState('todos');   // todos | Gallo | Gallina | Pollo
   const [soloAmarrados, setSoloAmarrados] = useState(false);
-  const [filtroEstado, setFiltroEstado] = useState('todos');  // todos | Activo | Muerto | Perdido | Regalado | Vendido
+  const [filtroEstado, setFiltroEstado] = useState('todos');
+  const [showRevision, setShowRevision] = useState(false);
+  const [hojaGallo, setHojaGallo] = useState(null);
+  const nRevisar = useMemo(() => revisarDatos(gallos).filter(g => g.nivel !== 'baja').reduce((a, g) => a + g.items.length, 0), [gallos]);  // todos | Activo | Muerto | Perdido | Regalado | Vendido
   const [orden, setOrden] = useState('nombre');             // nombre | recientes | pinche
 
   const sinAcentos = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -3187,11 +3190,20 @@ const GeneticaModule = () => {
           <h2 className="text-xl font-bold text-gray-800">Genética</h2>
           <p className="text-sm text-gray-500">{gallos.length} gallos registrados</p>
         </div>
-        {canEdit && <button onClick={() => { setForm(emptyForm); setEditingGallo(null); setPadreSelected(null); setMadreSelected(null); setShowForm(true); }}
-          className="bg-red-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-red-700 active:bg-red-800">
-          + Nuevo Gallo
-        </button>}
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowRevision(true)}
+            className="bg-white border border-gray-200 text-gray-700 px-3 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50 whitespace-nowrap">
+            🩺 Revisar{nRevisar > 0 ? <span className="ml-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{nRevisar}</span> : null}
+          </button>
+          {canEdit && <button onClick={() => { setForm(emptyForm); setEditingGallo(null); setPadreSelected(null); setMadreSelected(null); setShowForm(true); }}
+            className="bg-red-600 text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-red-700 active:bg-red-800 whitespace-nowrap">
+            + Nuevo Gallo
+          </button>}
+        </div>
       </div>
+      {showRevision && <RevisionDatosModal gallos={gallos} onClose={() => setShowRevision(false)}
+        onAbrir={(g) => { setShowRevision(false); if (canEdit) handleEdit(g); else setShowArbol(g); }} />}
+      {hojaGallo && <HojaPedigriModal gallo={gallos.find(x => x.id === hojaGallo.id) || hojaGallo} gallos={gallos} onClose={() => setHojaGallo(null)} />}
 
       {/* Búsqueda */}
       <Input type="text" placeholder="Buscar por nombre, pinche, color o línea..." value={searchQ}
@@ -3258,6 +3270,7 @@ const GeneticaModule = () => {
               </div>
               <div className="flex items-center gap-1 ml-2">
                 <button onClick={() => setShowArbol(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-lg" title="Árbol">🌳</button>
+                <button onClick={() => setHojaGallo(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-lg" title="Hoja de pedigrí">📄</button>
                 {canEdit && <button onClick={() => handleDelete(g)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 text-lg" title="Eliminar">🗑</button>}
               </div>
             </div>
@@ -4816,6 +4829,418 @@ const PeleasModule = () => {
 // ============================================
 // MÓDULO: DASHBOARD
 // ============================================
+// ============================================
+// REVISIÓN DE DATOS: lo que hay que arreglar en la base de datos
+// ============================================
+const normNombre = (t) => sinAcentosG(t).replace(/[^a-z0-9]+/g, ' ').trim();
+const revisarDatos = (gallos) => {
+  const byId = new Map(gallos.map(g => [g.id, g]));
+  const vivo = (g) => !g.estado || g.estado === 'Activo';
+  const grupos = [];
+  const add = (id, nivel, titulo, desc, items) => { if (items.length) grupos.push({ id, nivel, titulo, desc, items }); };
+
+  // Pinches que son el mismo número (25 y 025) en fichas distintas
+  const porPin = new Map();
+  gallos.forEach(g => { if (g.numero_pinches != null && String(g.numero_pinches).trim() !== '') { const k = pinSinCeros(g.numero_pinches); (porPin.get(k) || porPin.set(k, []).get(k)).push(g); } });
+  const pinDup = [];
+  porPin.forEach((L, k) => { if (L.length > 1) L.forEach(g => pinDup.push({ g, texto: 'Pinche ' + g.numero_pinches + ' — mismo número que ' + L.filter(x => x.id !== g.id).map(x => nombreGallo(x) + ' (#' + x.numero_pinches + ')').join(', ') })); });
+  add('pin_dup', 'alta', 'Pinches repetidos', 'Dos fichas con el mismo número de pinche (con o sin cero). Puede ser la misma ave anotada dos veces.', pinDup);
+
+  // Pinches anotados en el nombre como "repetido"
+  add('pin_rep', 'alta', 'Marcados como pinche repetido', 'Fichas que dicen "repetido" en el nombre y no tienen pinche propio.',
+    gallos.filter(g => /repetid/i.test(g.nombre || '')).map(g => ({ g, texto: nombreGallo(g) })));
+
+  // Nombres iguales
+  const porNom = new Map();
+  gallos.forEach(g => { const k = normNombre(g.nombre); if (k.length >= 4 && !/^\d/.test(k)) (porNom.get(k) || porNom.set(k, []).get(k)).push(g); });
+  const nomDup = [];
+  porNom.forEach(L => { if (L.length > 1) L.forEach(g => nomDup.push({ g, texto: nombreGallo(g) + (g.numero_pinches ? ' #' + g.numero_pinches : ' (sin pinche)') + ' — hay ' + L.length + ' con este nombre' })); });
+  add('nom_dup', 'media', 'Posibles duplicados por nombre', 'Fichas con el mismo nombre. Si son la misma ave, hay que unirlas.', nomDup);
+
+  // Padres y madres con el sexo cruzado
+  const sexoMal = [];
+  gallos.forEach(g => {
+    const m = byId.get(g.madre_id), p = byId.get(g.padre_id);
+    if (m && m.sexo !== 'Gallina') sexoMal.push({ g: m, texto: nombreGallo(m) + ' es madre de ' + nombreGallo(g) + ' pero está como ' + m.sexo });
+    if (p && p.sexo !== 'Gallo') sexoMal.push({ g: p, texto: nombreGallo(p) + ' es padre de ' + nombreGallo(g) + ' pero está como ' + p.sexo });
+  });
+  const vistos = new Set();
+  add('sexo_padres', 'alta', 'Padre o madre con el sexo equivocado', 'Una madre que está como gallo o un padre que está como gallina.',
+    sexoMal.filter(x => !vistos.has(x.g.id) && vistos.add(x.g.id)));
+
+  // Nombre dice gallina pero está como gallo (o al revés)
+  add('sexo_nombre', 'media', 'El nombre no cuadra con el sexo', 'Por ejemplo, se llama "Gallina…" pero está como gallo.',
+    gallos.filter(g => (/^gallina\b|^pollona\b/i.test(sinAcentosG(g.nombre)) && g.sexo === 'Gallo') || (/^gallo\b/i.test(sinAcentosG(g.nombre)) && g.sexo === 'Gallina'))
+      .map(g => ({ g, texto: nombreGallo(g) + ' está como ' + g.sexo })));
+
+  // Pollos que ya deberían tener sexo
+  const hoy = hoyStr();
+  add('pollos_viejos', 'media', 'Pollos que ya deberían tener sexo', 'Pollos de más de 5 meses que todavía dicen "Pollo". Mientras sean pollo no salen en el Asesor.',
+    gallos.filter(g => vivo(g) && g.sexo === 'Pollo' && (g.fecha_nacimiento || g.created_at) && diasEntre(String(g.fecha_nacimiento || g.created_at).slice(0, 10), hoy) > 150)
+      .map(g => ({ g, texto: nombreGallo(g) + (g.fecha_nacimiento ? ' · nació el ' + fmtF(g.fecha_nacimiento) : ' · sin fecha de nacimiento') })));
+
+  // Fichas incompletas (solo vivos)
+  const vivos = gallos.filter(vivo);
+  add('sin_padres', 'baja', 'Sin padre ni madre', 'No se puede sacar su sangre ni su árbol.', vivos.filter(g => !g.padre_id && !g.madre_id).map(g => ({ g, texto: nombreGallo(g) + (g.numero_pinches && g.nombre ? ' #' + g.numero_pinches : '') })));
+  add('sin_foto', 'baja', 'Sin foto', '', vivos.filter(g => !g.foto).map(g => ({ g, texto: nombreGallo(g) + (g.numero_pinches && g.nombre ? ' #' + g.numero_pinches : '') })));
+  add('sin_desc', 'baja', 'Sin color ni descripción', '', vivos.filter(g => !g.color && !(g.observaciones || '').trim()).map(g => ({ g, texto: nombreGallo(g) + (g.numero_pinches && g.nombre ? ' #' + g.numero_pinches : '') })));
+  return grupos;
+};
+
+const NIVEL_META = {
+  alta: { txt: 'Arreglar', cls: 'bg-red-100 text-red-700', borde: 'border-red-200' },
+  media: { txt: 'Revisar', cls: 'bg-amber-100 text-amber-700', borde: 'border-amber-200' },
+  baja: { txt: 'Completar', cls: 'bg-gray-100 text-gray-600', borde: 'border-gray-200' },
+};
+
+const RevisionDatosModal = ({ gallos, onAbrir, onClose }) => {
+  const grupos = useMemo(() => revisarDatos(gallos), [gallos]);
+  const [abierto, setAbierto] = useState(() => { const g = grupos.find(x => x.nivel !== 'baja'); return g ? g.id : null; });
+  const nArreglar = grupos.filter(g => g.nivel !== 'baja').reduce((a, g) => a + g.items.length, 0);
+  return (
+    <Modal title="🩺 Revisar datos" onClose={onClose}>
+      <p className="text-sm text-gray-600 mb-3">
+        {nArreglar > 0 ? <>Hay <b>{nArreglar}</b> cosa{nArreglar === 1 ? '' : 's'} para arreglar o revisar. Toca una para abrir la ficha.</> : '✅ No hay errores en la base de datos. Abajo está lo que falta por completar.'}
+      </p>
+      <div className="space-y-2">
+        {grupos.map(gr => (
+          <div key={gr.id} className={`border rounded-xl ${NIVEL_META[gr.nivel].borde}`}>
+            <button onClick={() => setAbierto(a => a === gr.id ? null : gr.id)} className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left">
+              <span className="min-w-0">
+                <span className="text-sm font-semibold text-gray-800">{gr.titulo}</span>
+                <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${NIVEL_META[gr.nivel].cls}`}>{gr.items.length}</span>
+              </span>
+              <span className="text-gray-400 text-xs flex-shrink-0">{abierto === gr.id ? '▴' : '▾'}</span>
+            </button>
+            {abierto === gr.id && (
+              <div className="px-3 pb-3">
+                {gr.desc && <p className="text-[11px] text-gray-500 mb-2">{gr.desc}</p>}
+                <div className="space-y-1 max-h-72 overflow-y-auto">
+                  {gr.items.map((it, i) => (
+                    <button key={gr.id + i} onClick={() => onAbrir(it.g)} className="w-full text-left text-xs bg-white border border-gray-100 rounded-lg px-2.5 py-2 hover:bg-gray-50 flex items-center gap-2">
+                      <span className="text-gray-400">{sexoIcon(it.g)}</span>
+                      <span className="flex-1 text-gray-700">{it.texto}</span>
+                      <span className="text-red-600 font-semibold flex-shrink-0">Abrir ▸</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+};
+
+// ============================================
+// PENDIENTES Y RECORDATORIOS (Inicio)
+// ============================================
+const calcularPendientes = (gallos, cruces, eventos) => {
+  const hoy = hoyStr();
+  const out = [];
+  const byId = new Map(gallos.map(g => [g.id, g]));
+  // Gallinas en limpieza
+  gallos.filter(g => g.sexo === 'Gallina' && (!g.estado || g.estado === 'Activo') && g.limpieza_desde).forEach(h => {
+    const e = estadoLimpieza(h, cruces);
+    if (e.tipo !== 'limpiando') return;
+    out.push({ key: 'limpia-' + h.id + '-' + e.fechaLista, fecha: e.fechaLista, icon: e.lista ? '✅' : '🧼', tipo: 'limpieza',
+      titulo: e.lista ? nombreGallo(h) + ' ya está limpia' : nombreGallo(h) + ' queda limpia',
+      sub: e.lista ? `Lleva ${e.dias} días aparte. Ya se le puede echar el gallo.` : `Cumple ${DIAS_LIMPIEZA} días (va por ${e.dias}).` });
+  });
+  // Castas: nacimientos y pollos sin pinchar
+  cruces.forEach(c => {
+    if (c.estado === 'Cerrado') return;
+    const evs = eventos.filter(e => e.cruce_id === c.id);
+    const pollos = gallos.filter(g => g.cruce_id === c.id);
+    const r = resumenCasta(c, evs, pollos);
+    const titulo = nombreGallo(byId.get(c.padre_id)) + ' × ' + nombreGallo(byId.get(c.madre_id));
+    if (r.esperada) out.push({ key: 'nace-' + c.id + '-' + r.esperada, fecha: r.esperada, icon: '🐣', tipo: 'nacimiento', titulo: 'Deben nacer los pollos', sub: titulo + ' · empollando desde el ' + fmtF(r.empolle) });
+    if (r.fNac && pollos.length > r.pinchados) out.push({ key: 'pinchar-' + c.id, fecha: hoy, icon: '🏷️', tipo: 'pinchar', titulo: `Faltan ${pollos.length - r.pinchados} pollo${pollos.length - r.pinchados === 1 ? '' : 's'} por pinchar`, sub: titulo + ' · nacieron el ' + fmtF(r.fNac) });
+    if (!r.huevos && !r.empolle && !r.fNac && !r.fallido && c.fecha_cruce && diasEntre(c.fecha_cruce, hoy) >= 14)
+      out.push({ key: 'sinhuevo-' + c.id, fecha: hoy, icon: '🥚', tipo: 'revisar', titulo: 'Casta sin huevos anotados', sub: titulo + ` · le echaste el gallo hace ${diasEntre(c.fecha_cruce, hoy)} días` });
+  });
+  return out.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+};
+
+const icsFecha = (s) => String(s).slice(0, 10).replace(/-/g, '');
+const icsTexto = (t) => String(t || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
+const crearIcs = (items) => {
+  const ahora = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Gallero PR//Recordatorios//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Gallero PR'];
+  items.forEach(it => {
+    const d = icsFecha(it.fecha);
+    const sig = icsFecha(sumarDias(String(it.fecha).slice(0, 10), 1));
+    L.push('BEGIN:VEVENT', 'UID:' + it.key + '@galleropr', 'DTSTAMP:' + ahora, 'DTSTART;VALUE=DATE:' + d, 'DTEND;VALUE=DATE:' + sig,
+      'SUMMARY:' + icsTexto(it.icon + ' ' + it.titulo), 'DESCRIPTION:' + icsTexto(it.sub),
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsTexto(it.titulo), 'TRIGGER:PT8H', 'END:VALARM', 'END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.join('\r\n');
+};
+
+const PendientesCard = ({ gallos }) => {
+  const { activeOwnerId, toast } = useContext(AppContext);
+  const [cruces, setCruces] = useState([]);
+  const [eventos, setEventos] = useState([]);
+  const [verTodos, setVerTodos] = useState(false);
+  useEffect(() => {
+    if (!activeOwnerId) return;
+    Promise.all([
+      supabase.from('cruces').select('*').eq('user_id', activeOwnerId),
+      supabase.from('cruce_eventos').select('*').eq('user_id', activeOwnerId),
+    ]).then(([c, e]) => { setCruces(c.data || []); setEventos(e.data || []); });
+  }, [activeOwnerId]);
+  const items = useMemo(() => calcularPendientes(gallos, cruces, eventos), [gallos, cruces, eventos]);
+  const hoy = hoyStr();
+  const cuando = (f) => { const d = diasEntre(hoy, f); return d === 0 ? 'Hoy' : d === 1 ? 'Mañana' : d > 1 ? `En ${d} días` : `Hace ${-d} día${d === -1 ? '' : 's'}`; };
+  const ahora = items.filter(it => diasEntre(hoy, it.fecha) <= 7);
+  const despues = items.filter(it => diasEntre(hoy, it.fecha) > 7);
+  const futuros = items.filter(it => it.fecha >= hoy && (it.tipo === 'limpieza' || it.tipo === 'nacimiento'));
+
+  const alCalendario = async () => {
+    if (!futuros.length) { toast('No hay fechas próximas para avisarte', 'error'); return; }
+    const texto = crearIcs(futuros);
+    const nombre = 'gallero-recordatorios.ics';
+    try {
+      const file = new File([texto], nombre, { type: 'text/calendar' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Recordatorios Gallero PR' }); return; }
+    } catch (_) { /* si cancelan o no se puede compartir, se descarga */ }
+    const url = URL.createObjectURL(new Blob([texto], { type: 'text/calendar;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = nombre; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('Abre el archivo para añadir las fechas a tu calendario');
+  };
+
+  const Fila = ({ it }) => {
+    const d = diasEntre(hoy, it.fecha);
+    return (
+      <div className="flex items-start gap-2.5 py-2 border-b border-gray-100 last:border-0">
+        <span className="text-lg leading-6">{it.icon}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-800 leading-tight">{it.titulo}</p>
+          <p className="text-[11px] text-gray-500">{it.sub}</p>
+        </div>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${d < 0 ? 'bg-red-100 text-red-700' : d === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{cuando(it.fecha)}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-sm font-bold text-gray-800">🔔 Pendientes {ahora.length ? <span className="text-red-600">({ahora.length})</span> : null}</p>
+        <button onClick={alCalendario} className="text-[11px] font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">📅 Avisos en el teléfono</button>
+      </div>
+      {ahora.length === 0
+        ? <p className="text-xs text-gray-400 py-2">Nada para esta semana.</p>
+        : ahora.map(it => <Fila key={it.key} it={it} />)}
+      {despues.length > 0 && (
+        <>
+          <button onClick={() => setVerTodos(v => !v)} className="text-[11px] text-gray-500 font-semibold mt-1">{verTodos ? '▴ Ocultar' : `▾ Más adelante (${despues.length})`}</button>
+          {verTodos && despues.map(it => <Fila key={it.key} it={it} />)}
+        </>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// HOJA DE PEDIGRÍ (imagen para compartir / PDF)
+// ============================================
+const cargarImg = (src) => new Promise(res => { if (!src) return res(null); const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+const envolver = (ctx, texto, maxW, maxLineas) => {
+  const palabras = String(texto || '').split(/\s+/).filter(Boolean); const lineas = []; let l = '';
+  palabras.forEach(w => { const t = l ? l + ' ' + w : w; if (ctx.measureText(t).width > maxW && l) { lineas.push(l); l = w; } else l = t; });
+  if (l) lineas.push(l);
+  if (lineas.length > maxLineas) { lineas.length = maxLineas; let u = lineas[maxLineas - 1]; while (ctx.measureText(u + '…').width > maxW && u.length) u = u.slice(0, -1); lineas[maxLineas - 1] = u + '…'; }
+  return lineas;
+};
+const rr = (ctx, x, y, w, h, r) => { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); };
+
+const dibujarPedigri = async (g, byId, criador, conDesc) => {
+  const W = 1240, H = 1754; // A4 vertical
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const F = (peso, px) => `${peso} ${px}px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  // Encabezado
+  ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, W, 150);
+  ctx.fillStyle = '#ffffff'; ctx.font = F(800, 52); ctx.textBaseline = 'middle';
+  ctx.fillText('Hoja de pedigrí', 60, 62);
+  ctx.font = F(500, 28); ctx.fillStyle = '#fecaca';
+  ctx.fillText(criador ? 'Criador: ' + criador : 'Gallero PR', 60, 112);
+  ctx.textAlign = 'right'; ctx.fillText(new Date().toLocaleDateString('es-PR', { day: 'numeric', month: 'long', year: 'numeric' }), W - 60, 112); ctx.textAlign = 'left';
+
+  // Ficha principal
+  const top = 200, foto = await cargarImg(g.foto);
+  const fx = 60, fs = 360;
+  if (foto) {
+    ctx.save(); rr(ctx, fx, top, fs, fs, 24); ctx.clip();
+    const k = Math.max(fs / foto.width, fs / foto.height), w = foto.width * k, h = foto.height * k;
+    ctx.drawImage(foto, fx + (fs - w) / 2, top + (fs - h) / 2, w, h); ctx.restore();
+  } else {
+    rr(ctx, fx, top, fs, fs, 24); ctx.fillStyle = '#f3f4f6'; ctx.fill();
+    ctx.fillStyle = '#9ca3af'; ctx.font = F(600, 30); ctx.textAlign = 'center'; ctx.fillText('Sin foto', fx + fs / 2, top + fs / 2); ctx.textAlign = 'left';
+  }
+  const tx = fx + fs + 50, tw = W - tx - 60;
+  ctx.textBaseline = 'alphabetic';
+  let y = top + 20;
+  if (g.numero_pinches) { ctx.fillStyle = '#b91c1c'; ctx.font = F(800, 34); ctx.fillText('Pinche #' + g.numero_pinches, tx, y + 20); y += 62; }
+  ctx.fillStyle = '#111827'; ctx.font = F(800, 54);
+  envolver(ctx, g.nombre || (g.numero_pinches ? '#' + g.numero_pinches : 'Sin nombre'), tw, 2).forEach(l => { ctx.fillText(l, tx, y + 30); y += 62; });
+  y += 10;
+  const dato = (k, v) => { if (!v) return; ctx.font = F(600, 26); ctx.fillStyle = '#6b7280'; ctx.fillText(k, tx, y); ctx.font = F(600, 30); ctx.fillStyle = '#1f2937'; ctx.fillText(String(v), tx + 190, y); y += 46; };
+  dato('Sexo', g.sexo);
+  dato('Color', g.color);
+  dato('Línea', g.linea_genetica);
+  dato('Nacimiento', g.fecha_nacimiento ? new Date(g.fecha_nacimiento + 'T00:00:00').toLocaleDateString('es-PR', { day: 'numeric', month: 'long', year: 'numeric' }) : null);
+
+  // Descripción (sin notas privadas: solo la parte de plumaje si la hay)
+  let yd = Math.max(y + 10, top + fs + 40);
+  const desc = conDesc ? (g.observaciones || '').trim() : '';
+  if (desc) {
+    ctx.font = F(400, 26); ctx.fillStyle = '#374151';
+    envolver(ctx, desc, W - 120, 3).forEach(l => { ctx.fillText(l, 60, yd); yd += 36; });
+  }
+
+  // Árbol: padres, abuelos, bisabuelos
+  const t0 = yd + 40;
+  ctx.fillStyle = '#111827'; ctx.font = F(800, 34); ctx.fillText('Árbol genealógico', 60, t0);
+  const cols = [{ x: 60, w: 360, label: 'Padres' }, { x: 450, w: 360, label: 'Abuelos' }, { x: 840, w: 340, label: 'Bisabuelos' }];
+  ctx.font = F(700, 22); ctx.fillStyle = '#9ca3af';
+  cols.forEach(c => ctx.fillText(c.label.toUpperCase(), c.x, t0 + 44));
+  const area = { y: t0 + 70, h: H - (t0 + 70) - 90 };
+  const pos = (gen, i) => { const n = Math.pow(2, gen + 1); const slot = area.h / n; return area.y + slot * i + slot / 2; };
+  const caja = (gen, i, ave, esHembra) => {
+    const c = cols[gen]; const n = Math.pow(2, gen + 1); const bh = Math.min(118, area.h / n - 10); const cy = pos(gen, i);
+    rr(ctx, c.x, cy - bh / 2, c.w, bh, 14);
+    ctx.fillStyle = ave ? (esHembra ? '#fdf2f8' : '#eff6ff') : '#f9fafb'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = ave ? (esHembra ? '#f9a8d4' : '#93c5fd') : '#e5e7eb'; ctx.stroke();
+    const pad = 16; ctx.textBaseline = 'middle';
+    if (!ave) { ctx.font = F(500, 22); ctx.fillStyle = '#9ca3af'; ctx.fillText((esHembra ? '♀ ' : '♂ ') + 'Desconocido', c.x + pad, cy); ctx.textBaseline = 'alphabetic'; return cy; }
+    const big = gen === 0 ? 28 : gen === 1 ? 24 : 20;
+    const linea2 = [ave.numero_pinches && ave.nombre ? '#' + ave.numero_pinches : null, ave.color, gen < 2 ? ave.linea_genetica : null].filter(Boolean).join(' · ');
+    const dos = bh > 60 && linea2;
+    ctx.font = F(700, big);
+    const noms = envolver(ctx, (esHembra ? '♀ ' : '♂ ') + nombreGallo(ave), c.w - pad * 2, bh >= 95 ? 2 : 1);
+    const lh = big * 1.18, sh = dos ? big * 0.95 : 0;
+    let ty = cy - (noms.length * lh + sh) / 2 + lh / 2;
+    ctx.fillStyle = esHembra ? '#9d174d' : '#1e40af';
+    noms.forEach(l => { ctx.fillText(l, c.x + pad, ty); ty += lh; });
+    if (dos) { ctx.font = F(500, Math.round(big * 0.78)); ctx.fillStyle = '#6b7280'; ctx.fillText(envolver(ctx, linea2, c.w - pad * 2, 1)[0], c.x + pad, ty - lh / 2 + sh / 2 + 2); }
+    ctx.textBaseline = 'alphabetic';
+    return cy;
+  };
+  const linea = (gen, i, j) => {
+    const c = cols[gen], n = cols[gen + 1]; const y1 = pos(gen, i), y2 = pos(gen + 1, j); const xm = c.x + c.w + (n.x - c.x - c.w) / 2;
+    ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c.x + c.w, y1); ctx.lineTo(xm, y1); ctx.lineTo(xm, y2); ctx.lineTo(n.x, y2); ctx.stroke();
+  };
+  const nivel = [[byId.get(g.padre_id) || null, byId.get(g.madre_id) || null]];
+  for (let gen = 1; gen < 3; gen++) {
+    const prev = nivel[gen - 1], cur = [];
+    prev.forEach(a => { cur.push(a ? byId.get(a.padre_id) || null : null); cur.push(a ? byId.get(a.madre_id) || null : null); });
+    nivel.push(cur);
+  }
+  for (let gen = 0; gen < 2; gen++) nivel[gen].forEach((_, i) => { linea(gen, i, i * 2); linea(gen, i, i * 2 + 1); });
+  nivel.forEach((L, gen) => L.forEach((a, i) => caja(gen, i, a, i % 2 === 1)));
+
+  // Pie
+  ctx.fillStyle = '#f3f4f6'; ctx.fillRect(0, H - 70, W, 70);
+  ctx.fillStyle = '#6b7280'; ctx.font = F(500, 22); ctx.textBaseline = 'middle';
+  ctx.fillText('Hecho con Gallero PR', 60, H - 35);
+  ctx.textAlign = 'right'; ctx.fillText((g.numero_pinches ? '#' + g.numero_pinches + ' · ' : '') + (g.nombre || ''), W - 60, H - 35); ctx.textAlign = 'left';
+  return cv;
+};
+
+const HojaPedigriModal = ({ gallo, gallos, onClose }) => {
+  const { toast, canEdit, loadGallos } = useContext(AppContext);
+  const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
+  const [criador, setCriador] = useState(() => { try { return localStorage.getItem('gp_criador') || ''; } catch (_) { return ''; } });
+  const [img, setImg] = useState(null);
+  const [destino, setDestino] = useState('');
+  const [tipo, setTipo] = useState('Vendido');
+  const [conDesc, setConDesc] = useState(true);
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    let vivo = true;
+    const t = setTimeout(async () => {
+      try { localStorage.setItem('gp_criador', criador); } catch (_) {}
+      const cv = await dibujarPedigri(gallo, byId, criador.trim(), conDesc);
+      if (vivo) { canvasRef.current = cv; setImg(cv.toDataURL('image/png')); }
+    }, 250);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [gallo, byId, criador, conDesc]);
+  const nombreArchivo = 'pedigri-' + (gallo.numero_pinches || '') + '-' + sinAcentosG(gallo.nombre || 'gallo').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const blobPng = () => new Promise(res => canvasRef.current.toBlob(res, 'image/png'));
+  const compartir = async () => {
+    if (!canvasRef.current) return;
+    const b = await blobPng(); const file = new File([b], nombreArchivo + '.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Pedigrí ' + nombreGallo(gallo) }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    descargar();
+  };
+  const descargar = async () => {
+    if (!canvasRef.current) return;
+    const b = await blobPng(); const url = URL.createObjectURL(b);
+    const a = document.createElement('a'); a.href = url; a.download = nombreArchivo + '.png'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+  const pdf = () => {
+    if (!img) return;
+    const w = window.open('', '_blank');
+    if (!w) { toast('Permite las ventanas emergentes para sacar el PDF', 'error'); return; }
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + nombreArchivo + '</title><style>@page{size:A4;margin:0}html,body{margin:0}img{width:100%;display:block}</style></head><body><img src="' + img + '" onload="setTimeout(function(){window.print()},300)"></body></html>');
+    w.document.close();
+  };
+  const anotarSalida = async () => {
+    if (!destino.trim()) { toast('Escribe a quién se le dio', 'error'); return; }
+    const nota = (tipo === 'Vendido' ? 'Vendido a ' : 'Regalado a ') + destino.trim() + ' el ' + new Date().toLocaleDateString('es-PR', { day: 'numeric', month: 'short', year: 'numeric' }) + '.';
+    const obs = (gallo.observaciones || '').trim();
+    const { error } = await supabase.from('gallos').update({ estado: tipo, observaciones: obs ? obs + ' · ' + nota : nota }).eq('id', gallo.id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    toast('Anotado: ' + nota); setDestino(''); loadGallos();
+  };
+  return (
+    <Modal title={'📄 Pedigrí · ' + nombreGallo(gallo)} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Nombre del criador o gallera (sale arriba)">
+          <Input value={criador} onChange={e => setCriador(e.target.value)} placeholder="ej: Gallera Yoel" />
+        </Field>
+        <label className="flex items-center gap-2 text-xs text-gray-600">
+          <input type="checkbox" checked={conDesc} onChange={e => setConDesc(e.target.checked)} />
+          Incluir la descripción de la ficha
+        </label>
+        <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50 min-h-[200px] flex items-center justify-center">
+          {img ? <img src={img} className="w-full block" alt="Pedigrí" /> : <span className="text-sm text-gray-400 py-16">Preparando la hoja…</span>}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={compartir} disabled={!img} className="py-2.5 rounded-lg text-xs font-semibold bg-green-600 text-white disabled:opacity-50">📤 Compartir</button>
+          <button onClick={descargar} disabled={!img} className="py-2.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 disabled:opacity-50">⬇️ Imagen</button>
+          <button onClick={pdf} disabled={!img} className="py-2.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 disabled:opacity-50">🖨️ PDF</button>
+        </div>
+        <p className="text-[11px] text-gray-400">"Compartir" abre WhatsApp y las demás apps del teléfono. Si la descripción tiene notas tuyas que no quieres enseñar, quita la marca de arriba.</p>
+        {canEdit && (!gallo.estado || gallo.estado === 'Activo') && (
+          <div className="border-t border-gray-100 pt-3">
+            <p className="text-xs font-bold text-gray-500 uppercase mb-2">¿Se va? Anótalo</p>
+            <div className="flex gap-2">
+              <select value={tipo} onChange={e => setTipo(e.target.value)} className="border border-gray-300 rounded-lg px-2 text-sm">
+                <option value="Vendido">💵 Vendido</option>
+                <option value="Regalado">🎁 Regalado</option>
+              </select>
+              <Input value={destino} onChange={e => setDestino(e.target.value)} placeholder="¿A quién?" />
+              <button onClick={anotarSalida} className="px-3 rounded-lg text-xs font-semibold bg-gray-800 text-white whitespace-nowrap">Guardar</button>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">Le cambia el estado y deja la nota con la fecha en la ficha.</p>
+          </div>
+        )}
+        {gallo.estado && gallo.estado !== 'Activo' && <p className="text-[11px] text-gray-500 border-t border-gray-100 pt-3">Estado: {(ESTADO_META[gallo.estado] || {}).icon} {gallo.estado}</p>}
+      </div>
+    </Modal>
+  );
+};
+
 const DashboardModule = () => {
   const { gallos, toast } = useContext(AppContext);
   const [selected, setSelected] = useState(null);
@@ -4828,6 +5253,7 @@ const DashboardModule = () => {
   const [showDetEnt, setShowDetEnt] = useState(null);
   const [showDetPel, setShowDetPel] = useState(null);
   const [viewingPhoto, setViewingPhoto] = useState(null);
+  const [showHoja, setShowHoja] = useState(false);
   const topRef = useRef(null);
 
   const loadData = async (gallo) => {
@@ -4857,6 +5283,8 @@ const DashboardModule = () => {
     <div className="fade-in">
       <h2 className="text-xl font-bold text-gray-800 mb-1">Dashboard</h2>
       <p className="text-sm text-gray-500 mb-4">Busca un gallo para ver toda su información</p>
+
+      {!selected && <PendientesCard gallos={gallos} />}
 
       <div ref={topRef} />
       <GalloSearch gallos={gallos} selected={selected}
@@ -4916,7 +5344,11 @@ const DashboardModule = () => {
               <button onClick={() => setShowArbol(true)} className="bg-gray-100 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-200">
                 🌳 Árbol Genealógico
               </button>
+              <button onClick={() => setShowHoja(true)} className="col-span-2 bg-green-50 text-green-700 border border-green-200 py-2 rounded-lg text-sm font-semibold hover:bg-green-100">
+                📄 Hoja de pedigrí para compartir
+              </button>
             </div>
+            {showHoja && <HojaPedigriModal gallo={gallos.find(x => x.id === selected.id) || selected} gallos={gallos} onClose={() => setShowHoja(false)} />}
           </div>
 
           {/* Entrenamientos recientes */}
