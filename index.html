@@ -298,14 +298,27 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
   const ref = useRef();
 
   const filtered = useMemo(() => {
-    if (!q) return [];
-    const query = q.toLowerCase();
+    const sa = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const query = sa(q).trim().replace(/^#/, '');
+    if (!query) return [];
+    const esNum = /^\d+$/.test(query);
     let list = gallos;
     if (filter) list = list.filter(filter);
-    return list.filter(g =>
-      (g.nombre && g.nombre.toLowerCase().includes(query)) ||
-      coincidePinche(g.numero_pinches, q)
-    ).slice(0, 10);
+    const rank = (g) => {
+      const pin = g.numero_pinches == null ? '' : String(g.numero_pinches);
+      const nom = sa(g.nombre);
+      if (esNum && pin && (pin === query || pinSinCeros(pin) === pinSinCeros(query))) return 0;
+      if (esNum && pin && (pin.startsWith(query) || pinSinCeros(pin).startsWith(pinSinCeros(query)))) return 1;
+      if (nom.startsWith(query)) return 2;
+      if ((' ' + nom).includes(' ' + query)) return 3;
+      if (nom.includes(query)) return 4;
+      if (coincidePinche(pin, query)) return 5;
+      if (sa(g.color).includes(query) || sa(g.linea_genetica).includes(query)) return 6;
+      return -1;
+    };
+    return list.map(g => [g, rank(g)]).filter(x => x[1] >= 0)
+      .sort((a, b) => a[1] - b[1] || sa(a[0].nombre).localeCompare(sa(b[0].nombre)))
+      .slice(0, 15).map(x => x[0]);
   }, [q, gallos, filter]);
 
   useEffect(() => {
@@ -333,12 +346,12 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
         onFocus={() => setOpen(true)}
       />
       {open && q && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 max-h-48 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 max-h-64 overflow-y-auto">
           {filtered.length > 0 ? filtered.map(g => (
             <button key={g.id} onClick={() => { onSelect(g); setQ(''); setOpen(false); }}
               className="w-full text-left px-3 py-2.5 hover:bg-red-50 border-b border-gray-100 last:border-0">
               <p className="font-medium text-gray-800 text-sm">{g.nombre || 'Sin nombre'} {g.numero_pinches ? `(#${g.numero_pinches})` : ''}</p>
-              <p className="text-xs text-gray-500">{g.linea_genetica || 'Sin línea'} • {g.sexo} {g.amarrado ? '• Amarrado' : ''}</p>
+              <p className="text-xs text-gray-500">{[g.sexo, g.color, g.linea_genetica || 'Sin línea', g.amarrado ? 'Amarrado' : null, g.estado && g.estado !== 'Activo' ? (ESTADO_META[g.estado] ? ESTADO_META[g.estado].icon + ' ' : '') + g.estado : null].filter(Boolean).join(' • ')}</p>
             </button>
           )) : <p className="px-3 py-2.5 text-sm text-gray-400">No encontrado</p>}
         </div>
@@ -1674,9 +1687,10 @@ const FT_TRAIT_OPTS = (() => {
 })();
 
 const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
-  const machos = useMemo(() => gallos.filter(g => g.sexo === 'Gallo'), [gallos]);
-  const hembras = useMemo(() => gallos.filter(g => g.sexo === 'Gallina'), [gallos]);
-  const [objetivoId, setObjetivoId] = useState((machos[0] && machos[0].id) || (gallos[0] && gallos[0].id) || null);
+  const vivo = (g) => !g.estado || g.estado === 'Activo';
+  const machos = useMemo(() => gallos.filter(g => g.sexo === 'Gallo' && vivo(g)), [gallos]);
+  const hembras = useMemo(() => gallos.filter(g => g.sexo === 'Gallina' && vivo(g)), [gallos]);
+  const [objetivoId, setObjetivoId] = useState(null);
   const [baseId, setBaseId] = useState('');
   const [lineaPareja, setLineaPareja] = useState('cualquiera'); // cualquiera | distinta | misma
   const [consangMax, setConsangMax] = useState(0.25);
@@ -1736,12 +1750,13 @@ const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3">
           <Field label="Gallo objetivo (a qué quieres que tire la cría)">
-            <Select value={objetivoId || ''} onChange={e => setObjetivoId(e.target.value)}
-              options={gallos.map(g => ({ value: g.id, label: nombreGallo(g) + (g.linea_genetica ? ' · ' + g.linea_genetica : '') }))} />
+            <GalloSearch gallos={gallos} selected={objetivo} onSelect={g => setObjetivoId(g.id)} onClear={() => setObjetivoId(null)}
+              placeholder="Buscar por nombre o pinche..." />
           </Field>
           <Field label="Fijar un ejemplar (opcional)">
-            <Select value={baseId} onChange={e => setBaseId(e.target.value)}
-              options={[{ value: '', label: 'Explorar todas las parejas' }].concat(gallos.map(g => ({ value: g.id, label: (g.sexo === 'Gallina' ? '♀ ' : '♂ ') + nombreGallo(g) })))} />
+            <GalloSearch gallos={gallos} selected={baseId ? byId.get(baseId) : null} onSelect={g => setBaseId(g.id)} onClear={() => setBaseId('')}
+              filter={g => (g.sexo === 'Gallo' || g.sexo === 'Gallina') && vivo(g)}
+              placeholder="Vacío = explorar todas las parejas. Buscar gallo o gallina..." />
           </Field>
         </div>
 
@@ -1771,7 +1786,7 @@ const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
         <div className="border-t border-gray-100 pt-3">
           <p className="text-xs font-bold text-gray-500 uppercase mb-2">Mejores cruces ({resultados.length})</p>
           {resultados.length === 0 ? (
-            <p className="text-center text-gray-400 py-6 text-sm">No hay cruces que cumplan los filtros. Prueba a relajar el parentesco o la consanguinidad.</p>
+            <p className="text-center text-gray-400 py-6 text-sm">{objetivo ? 'No hay cruces que cumplan los filtros. Prueba a relajar el parentesco o la consanguinidad.' : 'Busca arriba el gallo objetivo para ver los mejores cruces.'}</p>
           ) : (
             <div className="space-y-2">
               {resultados.map((r, i) => (
