@@ -300,7 +300,10 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
   const filtered = useMemo(() => {
     const sa = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const query = sa(q).trim().replace(/^#/, '');
-    if (!query) return [];
+    if (!query) {
+      let all = gallos; if (filter) all = all.filter(filter);
+      return all.slice().sort((a, b) => !a.nombre - !b.nombre || sa(a.nombre).localeCompare(sa(b.nombre)) || pinNum(a.numero_pinches) - pinNum(b.numero_pinches)).slice(0, 60);
+    }
     const esNum = /^\d+$/.test(query);
     let list = gallos;
     if (filter) list = list.filter(filter);
@@ -318,7 +321,7 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
     };
     return list.map(g => [g, rank(g)]).filter(x => x[1] >= 0)
       .sort((a, b) => a[1] - b[1] || sa(a[0].nombre).localeCompare(sa(b[0].nombre)))
-      .slice(0, 15).map(x => x[0]);
+      .slice(0, 30).map(x => x[0]);
   }, [q, gallos, filter]);
 
   useEffect(() => {
@@ -345,7 +348,7 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
         value={q} onChange={e => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
       />
-      {open && q && (
+      {open && (q || filtered.length > 0) && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 max-h-64 overflow-y-auto">
           {filtered.length > 0 ? filtered.map(g => (
             <button key={g.id} onClick={() => { onSelect(g); setQ(''); setOpen(false); }}
@@ -2392,13 +2395,13 @@ const CastaderoModule = () => {
               <div>
                 <p className="text-xs font-semibold text-blue-600 mb-1">♂ Gallo (padre)</p>
                 <GalloSearch gallos={gallos} selected={padre} onSelect={setPadre} onClear={() => setPadre(null)}
-                  placeholder="Buscar gallo..." filter={g => g.sexo === 'Gallo'} />
+                  placeholder="Buscar gallo por nombre o pinche..." filter={g => g.sexo === 'Gallo' && (!g.estado || g.estado === 'Activo')} />
               </div>
               <div className="text-center text-gray-300 text-xl leading-none">✕</div>
               <div>
                 <p className="text-xs font-semibold text-pink-600 mb-1">♀ Gallina (madre)</p>
                 <GalloSearch gallos={gallos} selected={madre} onSelect={setMadre} onClear={() => setMadre(null)}
-                  placeholder="Buscar gallina..." filter={g => g.sexo === 'Gallina'} />
+                  placeholder="Buscar gallina por nombre o pinche..." filter={g => g.sexo === 'Gallina' && (!g.estado || g.estado === 'Activo')} />
                 {madre && madre.limpieza_desde && estadoLimpieza(madre, cruces).tipo === 'limpiando' && (() => { const e = estadoLimpieza(madre, cruces); return (
                   <p className={`text-[11px] font-semibold mt-1 ${e.lista ? 'text-green-700' : 'text-orange-600'}`}>
                     {e.lista ? `✅ Limpia · ${e.dias} días en jaula aparte` : `⏳ Aún no está limpia · ${e.dias}/${DIAS_LIMPIEZA} días (lista el ${fmtF(e.fechaLista)})`}
