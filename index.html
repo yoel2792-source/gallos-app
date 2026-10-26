@@ -1695,16 +1695,32 @@ const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
   const [lineaPareja, setLineaPareja] = useState('cualquiera'); // cualquiera | distinta | misma
   const [consangMax, setConsangMax] = useState(0.25);
   const [parentSel, setParentSel] = useState({ ninguno: true, primos: true, medios: true, hermanos: true, tio: true, directo: true, lejano: true });
+  const [soloLimpias, setSoloLimpias] = useState(false);
+  const [ocultarCastando, setOcultarCastando] = useState(true);
+  const [variar, setVariar] = useState(true);
+  const [verFiltros, setVerFiltros] = useState(false);
+  const [cuantos, setCuantos] = useState(12);
+  const [analisis, setAnalisis] = useState(null); // { g, h }
 
   const model = useMemo(() => ftBuildModel(gallos, cruces || []), [gallos, cruces]);
   const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
   const objetivo = objetivoId ? byId.get(objetivoId) : null;
+  const base = baseId ? byId.get(baseId) : null;
+
+  // Gallinas que ahora mismo están en una casta en proceso
+  const castando = useMemo(() => {
+    const m = new Map();
+    (cruces || []).forEach(c => {
+      if (['Cerrado', 'Fallido', 'Eclosionado'].includes(c.estado)) return;
+      const prev = m.get(c.madre_id);
+      if (!prev || String(c.fecha_cruce) > String(prev.fecha_cruce)) m.set(c.madre_id, c);
+    });
+    return m;
+  }, [cruces]);
 
   const resultados = useMemo(() => {
     if (!objetivo) return [];
     const L = objetivo.linea_genetica || '';
-    const base = baseId ? byId.get(baseId) : null;
-    // Generar pares macho×hembra
     let pares = [];
     if (base) {
       if (base.sexo === 'Gallina') machos.forEach(g => pares.push([g, base]));
@@ -1712,10 +1728,13 @@ const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
     } else {
       machos.forEach(g => hembras.forEach(h => pares.push([g, h])));
     }
-    // Fase 1: filtros baratos + componente de sangre
     const fase1 = [];
     pares.forEach(([g, h]) => {
       if (g.id === h.id) return;
+      if (!base || base.id !== h.id) {
+        if (ocultarCastando && castando.has(h.id)) return;
+        if (soloLimpias) { const e = estadoLimpieza(h, cruces || []); if (!(e.tipo === 'limpiando' && e.lista)) return; }
+      }
       if (lineaPareja === 'distinta' && (g.linea_genetica || '') === (h.linea_genetica || '')) return;
       if (lineaPareja === 'misma' && (g.linea_genetica || '') !== (h.linea_genetica || '')) return;
       const rel = ftRelacion(g.id, h.id, model);
@@ -1726,103 +1745,179 @@ const AsesorCrucesModal = ({ gallos, cruces, onUsar, onClose }) => {
       fase1.push({ g, h, rel, bloodT, lineaCria, bloodComp });
     });
     fase1.sort((a, b) => b.bloodComp - a.bloodComp);
-    // Fase 2: sobre el top, calcular rasgos + consanguinidad
-    const top = fase1.slice(0, 30);
+    const top = fase1.slice(0, 80);
     const objTraits = (objetivo.caracteristicas || []).filter(t => FT_TRAIT_OPTS.has(t));
     const out = top.map(r => {
       const pred = predecirCruce(r.g, r.h, gallos);
       const tmap = {};
-      pred.categorias.forEach(cat => cat.subs.forEach(s => s.dist.forEach(d => { tmap[d.trait] = Math.max(tmap[d.trait] || 0, d.pct); })));
+      pred.categorias.forEach(cat => cat.subs.forEach(sb => sb.dist.forEach(d => { tmap[d.trait] = Math.max(tmap[d.trait] || 0, d.pct); })));
       let traitComp = null;
       if (objTraits.length) traitComp = objTraits.reduce((a, t) => a + (tmap[t] || 0), 0) / (objTraits.length * 100);
       const F = analizarConsanguinidad(r.g, r.h, gallos, cruces, 6).F;
       const score = Math.round(100 * (traitComp != null ? 0.5 * r.bloodComp + 0.5 * traitComp : r.bloodComp));
       return { ...r, traitComp, F, score };
     }).filter(r => r.F <= consangMax + 1e-9);
-    out.sort((a, b) => b.score - a.score);
-    return out.slice(0, 12);
-  }, [objetivo, baseId, lineaPareja, consangMax, parentSel, model, gallos, cruces, machos, hembras, byId]);
+    out.sort((a, b) => b.score - a.score || a.F - b.F);
+    if (!variar || base) return out;
+    // Variar: no más de 2 sugerencias por gallo ni por gallina
+    const cg = {}, ch = {}, res = [];
+    out.forEach(r => {
+      if ((cg[r.g.id] || 0) >= 2 || (ch[r.h.id] || 0) >= 2) return;
+      cg[r.g.id] = (cg[r.g.id] || 0) + 1; ch[r.h.id] = (ch[r.h.id] || 0) + 1; res.push(r);
+    });
+    return res;
+  }, [objetivo, base, lineaPareja, consangMax, parentSel, soloLimpias, ocultarCastando, variar, castando, model, gallos, cruces, machos, hembras]);
 
+  useEffect(() => { setCuantos(12); }, [objetivoId, baseId]);
   const toggleParent = k => setParentSel(p => ({ ...p, [k]: !p[k] }));
+  const nApagados = Object.values(parentSel).filter(v => !v).length;
+  const resumenFiltros = [
+    lineaPareja !== 'cualquiera' ? (lineaPareja === 'distinta' ? 'Distinta línea' : 'Misma línea') : null,
+    consangMax < 1 ? 'Consang. ≤ ' + (consangMax * 100) + '%' : 'Consang. sin límite',
+    nApagados ? nApagados + ' parentesco' + (nApagados === 1 ? '' : 's') + ' fuera' : null,
+    soloLimpias ? 'Solo limpias' : null,
+    ocultarCastando ? 'Sin las que están castando' : null,
+    variar ? 'Variado' : null,
+  ].filter(Boolean);
+  const conPin = (g) => nombreGallo(g) + (g && g.nombre && g.numero_pinches ? ' #' + g.numero_pinches : '');
+  const colorScore = (n) => n >= 60 ? '#16a34a' : n >= 45 ? '#ca8a04' : n >= 30 ? '#ea580c' : '#9ca3af';
+
+  const Barra = ({ label, v, color }) => (
+    <div className="flex items-center gap-2 text-[10px]">
+      <span className="w-20 text-gray-500 flex-shrink-0">{label}</span>
+      <span className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden"><span className="block h-full rounded-full" style={{ width: Math.round(v * 100) + '%', background: color }} /></span>
+      <b className="w-8 text-right text-gray-700">{Math.round(v * 100)}%</b>
+    </div>
+  );
+
+  const ChipHembra = ({ h }) => {
+    const c = castando.get(h.id);
+    if (c) { const gp = byId.get(c.padre_id); return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-pink-100 text-pink-700">❤️ Castando con {nombreGallo(gp)}</span>; }
+    const e = estadoLimpieza(h, cruces || []);
+    if (e.tipo === 'limpiando') return e.lista
+      ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">✅ Limpia ({e.dias} d)</span>
+      : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">⏳ Limpiándose {e.dias}/{DIAS_LIMPIEZA}</span>;
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">🧼 Sin limpiar</span>;
+  };
+
+  const lista = resultados.slice(0, cuantos);
 
   return (
     <Modal title="🎯 Asesor de cruces" onClose={onClose} wide>
       <div className="space-y-3">
-        <div className="grid grid-cols-1 gap-3">
-          <Field label="Gallo objetivo (a qué quieres que tire la cría)">
+        <div className="bg-gray-50 rounded-xl p-3 space-y-3">
+          <Field label="1 · ¿A qué gallo quieres que tire la cría?">
             <GalloSearch gallos={gallos} selected={objetivo} onSelect={g => setObjetivoId(g.id)} onClear={() => setObjetivoId(null)}
-              placeholder="Buscar por nombre o pinche..." />
+              placeholder="Buscar por nombre o pinche (puede ser uno que ya murió)..." />
           </Field>
-          <Field label="Fijar un ejemplar (opcional)">
-            <GalloSearch gallos={gallos} selected={baseId ? byId.get(baseId) : null} onSelect={g => setBaseId(g.id)} onClear={() => setBaseId('')}
+          {objetivo && (
+            <p className="text-[11px] text-gray-500 -mt-1">
+              {[objetivo.sexo, objetivo.color, objetivo.linea_genetica ? 'Línea ' + objetivo.linea_genetica : 'Sin línea',
+                (objetivo.caracteristicas || []).length ? (objetivo.caracteristicas || []).length + ' características' : 'sin características anotadas',
+                objetivo.estado && objetivo.estado !== 'Activo' ? (ESTADO_META[objetivo.estado] ? ESTADO_META[objetivo.estado].icon + ' ' : '') + objetivo.estado : null].filter(Boolean).join(' · ')}
+            </p>
+          )}
+          <Field label="2 · Fijar un gallo o gallina (opcional)">
+            <GalloSearch gallos={gallos} selected={base} onSelect={g => setBaseId(g.id)} onClear={() => setBaseId('')}
               filter={g => (g.sexo === 'Gallo' || g.sexo === 'Gallina') && vivo(g)}
-              placeholder="Vacío = explorar todas las parejas. Buscar gallo o gallina..." />
+              placeholder="Vacío = buscar entre todas las parejas vivas..." />
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Línea de la pareja">
-            <Select value={lineaPareja} onChange={e => setLineaPareja(e.target.value)}
-              options={[{ value: 'cualquiera', label: 'Cualquiera' }, { value: 'distinta', label: 'Distinta línea' }, { value: 'misma', label: 'Misma línea' }]} />
-          </Field>
-          <Field label="Consanguinidad máx.">
-            <Select value={String(consangMax)} onChange={e => setConsangMax(parseFloat(e.target.value))}
-              options={[{ value: '0.0625', label: '≤ 6.25% (suave)' }, { value: '0.125', label: '≤ 12.5%' }, { value: '0.25', label: '≤ 25%' }, { value: '1', label: 'Sin límite' }]} />
-          </Field>
+        <div className="border border-gray-200 rounded-xl">
+          <button onClick={() => setVerFiltros(v => !v)} className="w-full flex items-center justify-between px-3 py-2.5 text-left">
+            <span className="text-sm font-semibold text-gray-700">⚙️ Filtros</span>
+            <span className="text-[11px] text-gray-500 truncate ml-2">{verFiltros ? 'Ocultar ▴' : resumenFiltros.join(' · ') + ' ▾'}</span>
+          </button>
+          {verFiltros && (
+            <div className="px-3 pb-3 space-y-3 border-t border-gray-100 pt-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Línea de la pareja">
+                  <Select value={lineaPareja} onChange={e => setLineaPareja(e.target.value)}
+                    options={[{ value: 'cualquiera', label: 'Cualquiera' }, { value: 'distinta', label: 'Distinta línea' }, { value: 'misma', label: 'Misma línea' }]} />
+                </Field>
+                <Field label="Consanguinidad máx.">
+                  <Select value={String(consangMax)} onChange={e => setConsangMax(parseFloat(e.target.value))}
+                    options={[{ value: '0.0625', label: '≤ 6.25% (suave)' }, { value: '0.125', label: '≤ 12.5%' }, { value: '0.25', label: '≤ 25%' }, { value: '1', label: 'Sin límite' }]} />
+                </Field>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1.5">Parentesco permitido <span className="font-normal text-gray-400">(toca para quitar)</span></p>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.keys(PARENTESCO_META).map(k => (
+                    <button key={k} onClick={() => toggleParent(k)}
+                      className={`text-[11px] font-semibold px-2 py-1 rounded-full ${parentSel[k] ? PARENTESCO_META[k].cls : 'bg-gray-100 text-gray-400 line-through'}`}>
+                      {PARENTESCO_META[k].txt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[[soloLimpias, setSoloLimpias, '✅ Solo gallinas ya limpias'], [ocultarCastando, setOcultarCastando, '❤️ Quitar las que están castando'], [variar, setVariar, '🔀 Variar gallos y gallinas']].map(([v, set, t]) => (
+                  <button key={t} onClick={() => set(x => !x)}
+                    className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${v ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200'}`}>{t}</button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-gray-500 mb-1.5">Parentesco permitido</p>
-          <div className="flex flex-wrap gap-1.5">
-            {Object.keys(PARENTESCO_META).map(k => (
-              <button key={k} onClick={() => toggleParent(k)}
-                className={`text-[11px] font-semibold px-2 py-1 rounded-full ${parentSel[k] ? PARENTESCO_META[k].cls : 'bg-gray-100 text-gray-400 line-through'}`}>
-                {PARENTESCO_META[k].txt}
-              </button>
-            ))}
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-xs font-bold text-gray-500 uppercase">Mejores cruces {objetivo ? `(${resultados.length})` : ''}</p>
+            {objetivo && <p className="text-[10px] text-gray-400">Solo gallos y gallinas vivos</p>}
           </div>
-        </div>
-
-        <div className="border-t border-gray-100 pt-3">
-          <p className="text-xs font-bold text-gray-500 uppercase mb-2">Mejores cruces ({resultados.length})</p>
-          {resultados.length === 0 ? (
-            <p className="text-center text-gray-400 py-6 text-sm">{objetivo ? 'No hay cruces que cumplan los filtros. Prueba a relajar el parentesco o la consanguinidad.' : 'Busca arriba el gallo objetivo para ver los mejores cruces.'}</p>
+          {lista.length === 0 ? (
+            <p className="text-center text-gray-400 py-8 text-sm">{objetivo ? 'No hay cruces que cumplan los filtros. Abre ⚙️ Filtros y suelta el parentesco, la consanguinidad o la limpieza.' : 'Busca arriba el gallo al que quieres que tire la cría.'}</p>
           ) : (
             <div className="space-y-2">
-              {resultados.map((r, i) => (
-                <div key={r.g.id + r.h.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-gray-800 truncate">
-                        <span className="text-blue-600">♂ {nombreGallo(r.g)}</span>
-                        <span className="text-gray-300"> × </span>
-                        <span className="text-pink-600">♀ {nombreGallo(r.h)}</span>
-                      </p>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${PARENTESCO_META[r.rel.tipo].cls}`}>{r.rel.label}{r.rel.nota !== '—' && r.rel.tipo !== 'directo' ? ` (${r.rel.nota})` : ''}</span>
-                        <span className="text-[10px] text-gray-500">Consang. {(r.F * 100).toFixed(1)}%</span>
-                        {(r.g.linea_genetica || r.h.linea_genetica) && <span className="text-[10px] text-gray-400">{[r.g.linea_genetica, r.h.linea_genetica].filter(Boolean).join(' / ')}</span>}
+              {lista.map((r, i) => {
+                const fi = interpretarF(r.F);
+                return (
+                  <div key={r.g.id + r.h.id} className={`bg-white border rounded-xl p-3 ${i === 0 ? 'border-green-300 ring-1 ring-green-100' : 'border-gray-200'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="flex-shrink-0 w-12 h-12 rounded-full flex flex-col items-center justify-center text-white" style={{ background: colorScore(r.score) }}>
+                        <span className="text-base font-extrabold leading-none">{r.score}</span>
+                        <span className="text-[7px] uppercase opacity-90">afinidad</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] text-gray-400 font-semibold">#{i + 1}{i === 0 ? ' · La mejor opción' : ''}</p>
+                        <p className="text-sm font-bold leading-tight">
+                          <span className="text-blue-600">♂ {conPin(r.g)}</span>
+                          <span className="text-gray-300"> × </span>
+                          <span className="text-pink-600">♀ {conPin(r.h)}</span>
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${PARENTESCO_META[r.rel.tipo].cls}`}>{r.rel.label}{r.rel.nota !== '—' && r.rel.tipo !== 'directo' ? ` (${r.rel.nota})` : ''}</span>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${fi.cls}`}>🔬 {(r.F * 100).toFixed(1)}%</span>
+                          <ChipHembra h={r.h} />
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-lg font-extrabold text-red-600 leading-none">{r.score}</div>
-                      <div className="text-[9px] text-gray-400 uppercase">Afinidad</div>
+                    <div className="mt-2.5 space-y-1">
+                      <Barra label="Sangre objetivo" v={r.bloodT} color="#dc2626" />
+                      <Barra label={'Línea ' + (objetivo.linea_genetica || '—')} v={r.lineaCria} color="#9333ea" />
+                      {r.traitComp != null && <Barra label="Características" v={r.traitComp} color="#2563eb" />}
+                    </div>
+                    {(r.g.linea_genetica || r.h.linea_genetica) && <p className="text-[10px] text-gray-400 mt-1.5">Líneas: {r.g.linea_genetica || 'sin línea'} × {r.h.linea_genetica || 'sin línea'}</p>}
+                    <div className="flex gap-2 mt-2.5">
+                      <button onClick={() => setAnalisis({ g: r.g, h: r.h })} className="flex-1 py-2 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700">🌳 Ver árboles</button>
+                      <button onClick={() => { onUsar(r.g, r.h); onClose(); }} className="flex-1 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white">Usar este cruce ▸</button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
-                    <span>Sangre objetivo: <b className="text-gray-700">{Math.round(r.bloodT * 100)}%</b></span>
-                    {r.traitComp != null && <span>Rasgos: <b className="text-gray-700">{Math.round(r.traitComp * 100)}%</b></span>}
-                    <button onClick={() => { onUsar(r.g, r.h); onClose(); }} className="ml-auto text-red-600 font-semibold">Usar este cruce ▸</button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
+              {resultados.length > cuantos && (
+                <button onClick={() => setCuantos(c => c + 12)} className="w-full py-2 rounded-lg text-xs font-semibold text-gray-600 bg-gray-100">Ver más ({resultados.length - cuantos})</button>
+              )}
             </div>
           )}
           <p className="text-[10px] text-gray-400 mt-2 italic">
-            "Afinidad" combina cuánta sangre y cuántas características de <b>{objetivo ? nombreGallo(objetivo) : '—'}</b> tiende a heredar la cría. Es una guía sobre tus datos, no una garantía.
+            "Afinidad" combina cuánta sangre, cuánta línea y cuántas características de <b>{objetivo ? nombreGallo(objetivo) : '—'}</b> tiende a heredar la cría. Es una guía sobre tus datos, no una garantía.
           </p>
         </div>
       </div>
+      {analisis && <AnalisisCastaModal padre={analisis.g} madre={analisis.h} gallos={gallos} cruces={cruces} onClose={() => setAnalisis(null)} />}
     </Modal>
   );
 };
