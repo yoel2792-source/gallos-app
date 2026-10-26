@@ -204,6 +204,29 @@ const coincidePinche = (p, q) => {
   const s = String(p), qq = String(q).trim().replace(/^#/, '');
   return s.includes(qq) || (/^\d+$/.test(qq) && pinSinCeros(s).includes(pinSinCeros(qq)));
 };
+// Búsqueda única de gallos (nombre o pinche, sin acentos, con o sin ceros). -1 = no coincide; menor = mejor.
+const sinAcentosG = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const rankBusqueda = (g, q) => {
+  const query = sinAcentosG(q).trim().replace(/^#/, '');
+  if (!query) return 0;
+  const esNum = /^\d+$/.test(query);
+  const pin = g.numero_pinches == null ? '' : String(g.numero_pinches);
+  const nom = sinAcentosG(g.nombre);
+  if (esNum && pin && (pin === query || pinSinCeros(pin) === pinSinCeros(query))) return 0;
+  if (esNum && pin && (pin.startsWith(query) || pinSinCeros(pin).startsWith(pinSinCeros(query)))) return 1;
+  if (nom.startsWith(query)) return 2;
+  if ((' ' + nom).includes(' ' + query)) return 3;
+  if (nom.includes(query)) return 4;
+  if (coincidePinche(pin, query)) return 5;
+  if (sinAcentosG(g.color).includes(query) || sinAcentosG(g.linea_genetica).includes(query)) return 6;
+  return -1;
+};
+const motivoNoDisponible = (g) => {
+  if (g.estado && g.estado !== 'Activo') return 'está ' + g.estado.toLowerCase();
+  if (g.sexo === 'Pollo') return 'todavía es pollo (sexo por definir)';
+  if (!g.amarrado) return 'no está amarrado';
+  return 'es ' + String(g.sexo || '').toLowerCase();
+};
 const pinNum = (p) => { const n = parseInt(pinSinCeros(p), 10); return isNaN(n) ? Infinity : n; };
 const limpiarPinche = (v) => { const t = String(v == null ? '' : v).trim().replace(/^#/, ''); return t === '' ? null : t; };
 
@@ -304,22 +327,9 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
       let all = gallos; if (filter) all = all.filter(filter);
       return all.slice().sort((a, b) => !a.nombre - !b.nombre || sa(a.nombre).localeCompare(sa(b.nombre)) || pinNum(a.numero_pinches) - pinNum(b.numero_pinches)).slice(0, 60);
     }
-    const esNum = /^\d+$/.test(query);
     let list = gallos;
     if (filter) list = list.filter(filter);
-    const rank = (g) => {
-      const pin = g.numero_pinches == null ? '' : String(g.numero_pinches);
-      const nom = sa(g.nombre);
-      if (esNum && pin && (pin === query || pinSinCeros(pin) === pinSinCeros(query))) return 0;
-      if (esNum && pin && (pin.startsWith(query) || pinSinCeros(pin).startsWith(pinSinCeros(query)))) return 1;
-      if (nom.startsWith(query)) return 2;
-      if ((' ' + nom).includes(' ' + query)) return 3;
-      if (nom.includes(query)) return 4;
-      if (coincidePinche(pin, query)) return 5;
-      if (sa(g.color).includes(query) || sa(g.linea_genetica).includes(query)) return 6;
-      return -1;
-    };
-    return list.map(g => [g, rank(g)]).filter(x => x[1] >= 0)
+    return list.map(g => [g, rankBusqueda(g, query)]).filter(x => x[1] >= 0)
       .sort((a, b) => a[1] - b[1] || sa(a[0].nombre).localeCompare(sa(b[0].nombre)))
       .slice(0, 30).map(x => x[0]);
   }, [q, gallos, filter]);
@@ -327,8 +337,7 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
   const noDisponibles = useMemo(() => {
     const qq = String(q || '').trim().replace(/^#/, '');
     if (!filter || !qq || filtered.length) return [];
-    const sa = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    return gallos.filter(g => !filter(g) && (coincidePinche(g.numero_pinches, qq) || sa(g.nombre).includes(sa(qq)))).slice(0, 3);
+    return gallos.filter(g => !filter(g) && rankBusqueda(g, qq) >= 0 && rankBusqueda(g, qq) <= 4).slice(0, 3);
   }, [q, gallos, filter, filtered]);
 
   useEffect(() => {
@@ -368,7 +377,7 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
               No encontrado aquí
               {noDisponibles.map(g => (
                 <p key={g.id} className="text-[11px] text-orange-600 mt-1">
-                  {nombreGallo(g)}{g.numero_pinches ? ' #' + g.numero_pinches : ''} existe, pero no se puede escoger aquí porque {g.estado && g.estado !== 'Activo' ? 'está ' + g.estado.toLowerCase() : 'es ' + (g.sexo || '').toLowerCase()}.
+                  {nombreGallo(g)}{g.numero_pinches ? ' #' + g.numero_pinches : ''} existe, pero no se puede escoger aquí porque {motivoNoDisponible(g)}.
                   {g.sexo === 'Pollo' && !(g.estado && g.estado !== 'Activo') ? ' Cuando sepas si es gallo o gallina, cámbialo en su ficha.' : ''}
                 </p>
               ))}
@@ -1392,10 +1401,10 @@ const ArbolFamiliarModal = ({ gallos, cruces, initialFocusId, onClose }) => {
           </button>
         </div>
         {mode === 'focus' && (
-          <select value={focoId || ''} onChange={e => setFocoId(e.target.value)}
-            className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs max-w-[160px]">
-            {gallos.map(g => <option key={g.id} value={g.id}>{nombreGallo(g)}</option>)}
-          </select>
+          <div className="w-full sm:w-64 order-last sm:order-none">
+            <GalloSearch gallos={gallos} selected={gallos.find(g => g.id === focoId) || null}
+              onSelect={g => setFocoId(g.id)} onClear={() => setFocoId(null)} placeholder="Buscar por nombre o pinche..." />
+          </div>
         )}
         <div className="flex items-center gap-1.5 ml-auto">
           <button onClick={() => setZoom(z => Math.max(0.35, +(z - 0.1).toFixed(2)))} className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600">−</button>
@@ -2906,15 +2915,11 @@ const GeneticaModule = () => {
       (filtroSexo === 'todos' || g.sexo === filtroSexo) &&
       (!soloAmarrados || g.amarrado) &&
       (filtroEstado === 'todos' || (g.estado || 'Activo') === filtroEstado) &&
-      (!q ||
-        sinAcentos(g.nombre).includes(q) ||
-        coincidePinche(g.numero_pinches, q) ||
-        sinAcentos(g.linea_genetica).includes(q) ||
-        sinAcentos(g.color).includes(q) ||
-        (g.jaula != null && ('jaula ' + g.jaula) === q))
+      (!q || rankBusqueda(g, q) >= 0 || (g.jaula != null && ('jaula ' + g.jaula) === q))
     );
     L = L.slice();
-    if (orden === 'recientes') L.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    if (q) L.sort((a, b) => (rankBusqueda(a, q) < 0 ? 99 : rankBusqueda(a, q)) - (rankBusqueda(b, q) < 0 ? 99 : rankBusqueda(b, q)) || sinAcentos(a.nombre).localeCompare(sinAcentos(b.nombre)));
+    else if (orden === 'recientes') L.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
     else if (orden === 'pinche') L.sort((a, b) => (a.numero_pinches == null) - (b.numero_pinches == null) || (pinNum(a.numero_pinches) - pinNum(b.numero_pinches)) || String(a.numero_pinches || '').localeCompare(String(b.numero_pinches || '')));
     else L.sort((a, b) => !a.nombre - !b.nombre || sinAcentos(a.nombre).localeCompare(sinAcentos(b.nombre)) || (pinNum(a.numero_pinches) - pinNum(b.numero_pinches)));
     return L;
