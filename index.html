@@ -186,6 +186,16 @@ const PhotoViewer = ({ src, onClose }) => {
   );
 };
 
+// Estado del gallo (vivo, muerto, etc.)
+const ESTADOS_GALLO = ['Activo', 'Muerto', 'Perdido', 'Regalado', 'Vendido'];
+const ESTADO_META = {
+  Activo:   { icon: '',   label: 'Activo',   cls: '' },
+  Muerto:   { icon: '✝️', label: 'Muerto',   cls: 'bg-gray-800 text-white' },
+  Perdido:  { icon: '❓', label: 'Perdido',  cls: 'bg-orange-100 text-orange-700' },
+  Regalado: { icon: '🎁', label: 'Regalado', cls: 'bg-purple-100 text-purple-700' },
+  Vendido:  { icon: '💵', label: 'Vendido',  cls: 'bg-green-100 text-green-700' },
+};
+
 // Pinches: se guardan como texto tal cual se escriben (0412 se queda 0412).
 // Para buscar y ordenar, los ceros a la izquierda no cuentan: 412 encuentra 0412 y viceversa.
 const pinSinCeros = (p) => p == null ? '' : String(p).trim().replace(/^0+(?=\d)/, '');
@@ -2745,7 +2755,7 @@ const GeneticaModule = () => {
     numero_pinches: '', nombre: '', sexo: 'Gallo', amarrado: false, jaula: '',
     fecha_nacimiento: '', color: '', linea_genetica: '',
     padre_id: null, madre_id: null, caracteristicas: [], observaciones: '',
-    foto: null
+    foto: null, estado: 'Activo'
   };
   const [form, setForm] = useState(emptyForm);
   const [padreSelected, setPadreSelected] = useState(null);
@@ -2756,6 +2766,7 @@ const GeneticaModule = () => {
 
   const [filtroSexo, setFiltroSexo] = useState('todos');   // todos | Gallo | Gallina | Pollo
   const [soloAmarrados, setSoloAmarrados] = useState(false);
+  const [filtroEstado, setFiltroEstado] = useState('todos');  // todos | Activo | Muerto | Perdido | Regalado | Vendido
   const [orden, setOrden] = useState('nombre');             // nombre | recientes | pinche
 
   const sinAcentos = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -2764,6 +2775,7 @@ const GeneticaModule = () => {
     let L = gallos.filter(g =>
       (filtroSexo === 'todos' || g.sexo === filtroSexo) &&
       (!soloAmarrados || g.amarrado) &&
+      (filtroEstado === 'todos' || (g.estado || 'Activo') === filtroEstado) &&
       (!q ||
         sinAcentos(g.nombre).includes(q) ||
         coincidePinche(g.numero_pinches, q) ||
@@ -2776,7 +2788,7 @@ const GeneticaModule = () => {
     else if (orden === 'pinche') L.sort((a, b) => (a.numero_pinches == null) - (b.numero_pinches == null) || (pinNum(a.numero_pinches) - pinNum(b.numero_pinches)) || String(a.numero_pinches || '').localeCompare(String(b.numero_pinches || '')));
     else L.sort((a, b) => !a.nombre - !b.nombre || sinAcentos(a.nombre).localeCompare(sinAcentos(b.nombre)) || (pinNum(a.numero_pinches) - pinNum(b.numero_pinches)));
     return L;
-  }, [gallos, searchQ, filtroSexo, soloAmarrados, orden]);
+  }, [gallos, searchQ, filtroSexo, soloAmarrados, filtroEstado, orden]);
 
   const conteo = useMemo(() => ({
     todos: gallos.length,
@@ -2787,7 +2799,8 @@ const GeneticaModule = () => {
   }), [gallos, filtroSexo]);
   const fechaAnadido = (g) => g.created_at ? new Date(g.created_at).toLocaleDateString('es-PR', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
   const esNuevo = (g) => g.created_at && (Date.now() - new Date(g.created_at).getTime()) < 7 * 86400000;
-  const hayFiltros = filtroSexo !== 'todos' || soloAmarrados || !!searchQ;
+  const hayFiltros = filtroSexo !== 'todos' || soloAmarrados || filtroEstado !== 'todos' || !!searchQ;
+  const conteoEstado = (e) => gallos.filter(g => (g.estado || 'Activo') === e).length;
 
   const handleSave = async () => {
     if (!form.numero_pinches && !form.nombre) {
@@ -2809,6 +2822,7 @@ const GeneticaModule = () => {
       caracteristicas: form.caracteristicas,
       observaciones: form.observaciones || null,
       foto: form.foto || null,
+      estado: form.estado || 'Activo',
       user_id: activeOwnerId
     };
 
@@ -2847,7 +2861,8 @@ const GeneticaModule = () => {
       madre_id: gallo.madre_id,
       caracteristicas: gallo.caracteristicas || [],
       observaciones: gallo.observaciones || '',
-      foto: gallo.foto || null
+      foto: gallo.foto || null,
+      estado: gallo.estado || 'Activo'
     });
     const padre = gallos.find(g => g.id === gallo.padre_id);
     const madre = gallos.find(g => g.id === gallo.madre_id);
@@ -3063,8 +3078,13 @@ const GeneticaModule = () => {
       <div className="flex items-center justify-between mt-2 mb-3">
         <p className="text-xs text-gray-500">
           {filteredGallos.length} {hayFiltros ? 'encontrados' : 'en total'}
-          {hayFiltros && <button onClick={() => { setFiltroSexo('todos'); setSoloAmarrados(false); setSearchQ(''); }} className="ml-2 text-red-600 font-semibold">Quitar filtros</button>}
+          {hayFiltros && <button onClick={() => { setFiltroSexo('todos'); setSoloAmarrados(false); setFiltroEstado('todos'); setSearchQ(''); }} className="ml-2 text-red-600 font-semibold">Quitar filtros</button>}
         </p>
+        <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}
+          className={`text-xs border rounded-lg px-2 py-1.5 outline-none mr-1 ${filtroEstado !== 'todos' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-200'}`}>
+          <option value="todos">Estado: todos</option>
+          {ESTADOS_GALLO.map(e => <option key={e} value={e}>{e === 'Activo' ? 'Solo vivos (activos)' : ESTADO_META[e].icon + ' ' + e + 's'} ({conteoEstado(e)})</option>)}
+        </select>
         <select value={orden} onChange={e => setOrden(e.target.value)}
           className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
           <option value="nombre">Orden: nombre A–Z</option>
@@ -3078,7 +3098,7 @@ const GeneticaModule = () => {
         {filteredGallos.length === 0 ? (
           <p className="text-center text-gray-400 py-12">{hayFiltros ? 'Ninguno cumple con esa búsqueda' : 'No hay gallos registrados'}</p>
         ) : filteredGallos.map(g => (
-          <div key={g.id} className="bg-white rounded-lg border border-gray-200 p-3 active:bg-gray-50">
+          <div key={g.id} className={`bg-white rounded-lg border border-gray-200 p-3 active:bg-gray-50 ${g.estado && g.estado !== 'Activo' ? 'opacity-70' : ''}`}>
             <div className="flex items-start justify-between">
               {g.foto && <img src={g.foto} className="w-12 h-12 rounded-lg object-cover mr-3 flex-shrink-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); setViewingPhoto(g.foto); }} />}
               <div className="flex-1 min-w-0" onClick={() => handleEdit(g)}>
@@ -3087,6 +3107,7 @@ const GeneticaModule = () => {
                   {g.numero_pinches && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">#{g.numero_pinches}</span>}
                   {g.amarrado && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">Amarrado{g.jaula ? ` • Jaula ${g.jaula}` : ''}</span>}
                   <span className="text-xs text-gray-400">{sexoIcon(g)}</span>
+                  {g.estado && g.estado !== 'Activo' && ESTADO_META[g.estado] && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap ${ESTADO_META[g.estado].cls}`}>{ESTADO_META[g.estado].icon} {ESTADO_META[g.estado].label.toUpperCase()}</span>}
                   {esNuevo(g) && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold flex-shrink-0">NUEVO</span>}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -3149,6 +3170,17 @@ const GeneticaModule = () => {
                   onChange={e => setForm({...form, fecha_nacimiento: e.target.value})} />
               </Field>
             </div>
+
+            <Field label="Estado">
+              <div className="flex flex-wrap gap-1.5">
+                {ESTADOS_GALLO.map(e => (
+                  <button key={e} type="button" onClick={() => setForm({...form, estado: e})}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${form.estado === e ? (e === 'Activo' ? 'bg-green-600 text-white border-green-600' : 'bg-gray-800 text-white border-gray-800') : 'bg-white text-gray-600 border-gray-200'}`}>
+                    {e === 'Activo' ? '✅ Vivo (activo)' : ESTADO_META[e].icon + ' ' + e}
+                  </button>
+                ))}
+              </div>
+            </Field>
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Color">
