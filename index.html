@@ -142,6 +142,16 @@ const Toast = ({ message, type, onClose }) => {
 // ============================================
 // COMPONENTE: Modal genérico
 // ============================================
+// Crédito de Prisma Advisors (quien hizo la app)
+const PRISMA_URL = 'https://www.prisma-advisors.com';
+const PrismaCredito = ({ claro, className }) => (
+  <a href={PRISMA_URL} target="_blank" rel="noopener"
+    className={`inline-flex items-center gap-1.5 text-[11px] no-underline ${claro ? 'text-red-100 hover:text-white' : 'text-gray-400 hover:text-gray-600'} ${className || ''}`}>
+    <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-black ${claro ? 'bg-white/20 text-white' : 'bg-[#1e2a4a] text-white'}`}>P</span>
+    <span>Hecho por <b className="font-semibold">Prisma Advisors</b></span>
+  </a>
+);
+
 const Modal = ({ title, onClose, children, wide }) => (
   <div className="fixed inset-0 modal-overlay z-40 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
     <div className={`bg-white rounded-t-2xl md:rounded-2xl w-full ${wide ? 'md:max-w-4xl' : 'md:max-w-lg'} max-h-[90vh] overflow-y-auto shadow-2xl fade-in`}
@@ -5148,7 +5158,7 @@ const dibujarPedigri = async (g, byId, criador, conDesc) => {
   // Pie
   ctx.fillStyle = '#f3f4f6'; ctx.fillRect(0, H - 70, W, 70);
   ctx.fillStyle = '#6b7280'; ctx.font = F(500, 22); ctx.textBaseline = 'middle';
-  ctx.fillText('Hecho con Gallero PR', 60, H - 35);
+  ctx.fillText('Gallero PR · Hecho por Prisma Advisors · prisma-advisors.com', 60, H - 35);
   ctx.textAlign = 'right'; ctx.fillText((g.numero_pinches ? '#' + g.numero_pinches + ' · ' : '') + (g.nombre || ''), W - 60, H - 35); ctx.textAlign = 'left';
   return cv;
 };
@@ -6240,6 +6250,7 @@ const App = ({ user }) => {
         <div className="bg-red-700 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-md">
           <div>
             <h1 className="text-lg font-bold leading-tight">🐓 Gallero PR <span className="text-[10px] font-normal text-red-200 align-middle">v4</span></h1>
+            <PrismaCredito claro className="-mt-0.5" />
             {isCollaborator && <p className="text-xs text-red-200">Viendo gallos ajenos ({myRole})</p>}
           </div>
           <div className="flex items-center gap-2">
@@ -6266,6 +6277,10 @@ const App = ({ user }) => {
           {tab === 'entrenamientos' && <EntrenamientosModule />}
           {tab === 'peleas' && <PeleasModule />}
           {tab === 'dashboard' && <DashboardModule />}
+          <div className="text-center mt-10 mb-2">
+            <PrismaCredito />
+            <p className="text-[10px] text-gray-300 mt-0.5 italic">De una idea, infinitas soluciones.</p>
+          </div>
         </div>
 
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 shadow-lg">
@@ -6349,6 +6364,7 @@ const LoginScreen = ({ onLogin }) => {
           {loading ? 'Entrando...' : 'Entrar'}
         </button>
       </form>
+      <div className="mt-6"><PrismaCredito claro /></div>
       <p className="text-red-300 text-xs mt-6">Acceso solo por invitación</p>
     </div>
   );

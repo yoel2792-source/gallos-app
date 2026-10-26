@@ -235,7 +235,7 @@
       '<form id="f-login">' + (S.loginErr ? '<div class="err">' + esc(S.loginErr) + '</div>' : '') +
       '<label for="em">Email</label><input id="em" type="email" autocomplete="username" inputmode="email" autocapitalize="none" required>' +
       '<label for="pw">Contraseña</label><input id="pw" type="password" autocomplete="current-password" required>' +
-      '<button class="boton" type="submit">Entrar</button></form></div>';
+      '<button class="boton" type="submit">Entrar</button></form><a class="prisma" style="color:#fecaca" href="https://www.prisma-advisors.com" target="_blank" rel="noopener">Hecho por <b style="color:#fff">Prisma Advisors</b></a></div>';
   }
 
   function resultadosHTML() {
@@ -254,7 +254,7 @@
     }
     if (!L.length) h += '<div class="vacio">' + (S.gallos.length ? 'No encontré nada con “' + esc(S.q) + '”.' : 'Todavía no hay gallos registrados.') + '</div>';
     h += L.map(function (g) { return filaGallo(g); }).join('');
-    if (!S.q.trim()) h += '<div class="pie"><button class="boton sec2" data-a="refrescar">Actualizar la lista</button><a class="boton sec2" href="../">Abrir la app completa</a><button class="boton sec2" data-a="salir">Cerrar sesión</button></div>';
+    if (!S.q.trim()) h += '<div class="pie"><button class="boton sec2" data-a="refrescar">Actualizar la lista</button><a class="boton sec2" href="../">Abrir la app completa</a><button class="boton sec2" data-a="salir">Cerrar sesión</button><a class="prisma" href="https://www.prisma-advisors.com" target="_blank" rel="noopener">Hecho por <b>Prisma Advisors</b> · De una idea, infinitas soluciones.</a></div>';
     return h;
   }
   function vistaBuscar() {
