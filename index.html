@@ -2400,6 +2400,7 @@ const CastaderoModule = () => {
         <DetalleCastaModal
           cruce={detalle}
           gallos={gallos}
+          cruces={cruces}
           eventos={eventos.filter(e => e.cruce_id === detalle.id)}
           onClose={() => setDetalleId(null)}
           onReload={() => { loadCruces(); loadGallos(); }}
@@ -2474,7 +2475,7 @@ const PolloRow = ({ g, canEdit, onSaved, onVerArbol, toast }) => {
 };
 
 // Detalle de una casta: línea de tiempo, registro rápido y pollos
-const DetalleCastaModal = ({ cruce, gallos, eventos, onClose, onReload, onVerArbol, canEdit, toast, activeOwnerId }) => {
+const DetalleCastaModal = ({ cruce, gallos, cruces, eventos, onClose, onReload, onVerArbol, canEdit, toast, activeOwnerId }) => {
   const p = gallos.find(g => g.id === cruce.padre_id);
   const m = gallos.find(g => g.id === cruce.madre_id);
   const pollos = gallos.filter(g => g.cruce_id === cruce.id);
@@ -2482,6 +2483,10 @@ const DetalleCastaModal = ({ cruce, gallos, eventos, onClose, onReload, onVerArb
   const r = resumenCasta(cruce, evs, pollos);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [verCombi, setVerCombi] = useState(false);
+  const [showAnalisisC, setShowAnalisisC] = useState(false);
+  const consangC = useMemo(() => (p && m) ? analizarConsanguinidad(p, m, gallos, cruces || [], 6) : null, [p, m, gallos, cruces]);
+  const predC = useMemo(() => (verCombi && p && m) ? (predecirCruce(p, m, gallos) || cruce.prediccion || null) : null, [verCombi, p, m, gallos, cruce.prediccion]);
   const abrir = (tipo) => setForm({ tipo, fecha: hoyStr(), cantidad: tipo === 'huevo' ? '1' : '', nota: '' });
 
   // Mantiene el resumen de la casta al día con lo anotado
@@ -2593,6 +2598,41 @@ const DetalleCastaModal = ({ cruce, gallos, eventos, onClose, onReload, onVerArb
           </p>
           <span className={`text-[11px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${r.cls}`}>{r.fase}</span>
         </div>
+
+        {p && m && (
+          <div className="bg-white border border-gray-200 rounded-xl p-3">
+            <p className="text-xs font-bold text-gray-500 uppercase mb-2">🧬 Árbol y combinación</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => onVerArbol(p)} className="py-2 rounded-lg text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700">🌳 Árbol del gallo</button>
+              <button onClick={() => onVerArbol(m)} className="py-2 rounded-lg text-xs font-semibold border border-pink-200 bg-pink-50 text-pink-700">🌳 Árbol de la gallina</button>
+            </div>
+            {consangC && (
+              <button onClick={() => setShowAnalisisC(true)}
+                className={`w-full text-left rounded-lg p-2.5 mt-2 ${interpretarF(consangC.F).cls}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold">🔬 Consanguinidad ~{(consangC.F * 100).toFixed(1)}% · {interpretarF(consangC.F).txt}</p>
+                    <p className="text-[11px] opacity-80 truncate">{interpretarF(consangC.F).hint}</p>
+                  </div>
+                  <span className="text-[11px] font-semibold underline flex-shrink-0">Los dos árboles ▸</span>
+                </div>
+              </button>
+            )}
+            <button onClick={() => setVerCombi(v => !v)} className="w-full mt-2 py-2 rounded-lg text-xs font-semibold bg-gray-800 text-white">
+              {verCombi ? '▾ Ocultar la combinación' : '▸ Ver sangre de la cría y cómo puede salir'}
+            </button>
+            {verCombi && (
+              <div className="mt-3">
+                <SangreCriaCard padre={p} madre={m} gallos={gallos} />
+                <h3 className="text-sm font-bold text-gray-700 mb-2">🔮 Cómo puede salir la cría</h3>
+                <PrediccionCard prediccion={predC} />
+              </div>
+            )}
+          </div>
+        )}
+        {showAnalisisC && p && m && (
+          <AnalisisCastaModal padre={p} madre={m} gallos={gallos} cruces={cruces || []} onClose={() => setShowAnalisisC(false)} />
+        )}
 
         <div className="bg-gray-50 rounded-xl p-3">
           <Paso hecho titulo="Le echó el gallo" sub={fmtF(cruce.fecha_cruce)} />
