@@ -285,6 +285,7 @@
       (g.fecha_nacimiento ? '<span class="chip">Nació ' + fmtF(g.fecha_nacimiento) + ' ' + parseF(g.fecha_nacimiento).getFullYear() + '</span>' : '') +
       '</div></div></div>';
     if (g.observaciones) h += '<div class="obs">📝 ' + esc(g.observaciones) + '</div>';
+    h += '<button class="boton sec2" style="margin-top:12px" data-a="hoja" data-id="' + g.id + '">📄 Hoja de pedigrí · compartir o PDF</button>';
 
     h += '<div class="sec">Padres</div><div class="par">' + tarjetaPariente(p, 'Padre', false, rep(p)) + tarjetaPariente(m, 'Madre', true, rep(m)) + '</div>';
 
@@ -446,6 +447,157 @@
   });
   document.addEventListener('keydown', function (e) { if (e.target.id === 'q' && e.key === 'Enter') e.target.blur(); });
 
+  // ---------- hoja de pedigrí (misma que en la app completa) ----------
+  var cargarImg = (src) => new Promise(res => { if (!src) return res(null); var im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+  var envolver = (ctx, texto, maxW, maxLineas) => {
+    var palabras = String(texto || '').split(/\s+/).filter(Boolean); var lineas = []; let l = '';
+    palabras.forEach(w => { var t = l ? l + ' ' + w : w; if (ctx.measureText(t).width > maxW && l) { lineas.push(l); l = w; } else l = t; });
+    if (l) lineas.push(l);
+    if (lineas.length > maxLineas) { lineas.length = maxLineas; let u = lineas[maxLineas - 1]; while (ctx.measureText(u + '…').width > maxW && u.length) u = u.slice(0, -1); lineas[maxLineas - 1] = u + '…'; }
+    return lineas;
+  };
+  var rr = (ctx, x, y, w, h, r) => { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); };
+
+  var dibujarPedigri = async (g, byId, criador, conDesc) => {
+    var W = 1240, H = 1754; // A4 vertical
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var ctx = cv.getContext('2d');
+    var F = (peso, px) => `${peso} ${px}px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    // Encabezado
+    ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, W, 150);
+    ctx.fillStyle = '#ffffff'; ctx.font = F(800, 52); ctx.textBaseline = 'middle';
+    ctx.fillText('Hoja de pedigrí', 60, 62);
+    ctx.font = F(500, 28); ctx.fillStyle = '#fecaca';
+    ctx.fillText(criador ? 'Criador: ' + criador : 'Gallero PR', 60, 112);
+    ctx.textAlign = 'right'; ctx.fillText(new Date().toLocaleDateString('es-PR', { day: 'numeric', month: 'long', year: 'numeric' }), W - 60, 112); ctx.textAlign = 'left';
+
+    // Ficha principal
+    var top = 200, foto = await cargarImg(g.foto);
+    var fx = 60, fs = 360;
+    if (foto) {
+      ctx.save(); rr(ctx, fx, top, fs, fs, 24); ctx.clip();
+      var k = Math.max(fs / foto.width, fs / foto.height), w = foto.width * k, h = foto.height * k;
+      ctx.drawImage(foto, fx + (fs - w) / 2, top + (fs - h) / 2, w, h); ctx.restore();
+    } else {
+      rr(ctx, fx, top, fs, fs, 24); ctx.fillStyle = '#f3f4f6'; ctx.fill();
+      ctx.fillStyle = '#9ca3af'; ctx.font = F(600, 30); ctx.textAlign = 'center'; ctx.fillText('Sin foto', fx + fs / 2, top + fs / 2); ctx.textAlign = 'left';
+    }
+    var tx = fx + fs + 50, tw = W - tx - 60;
+    ctx.textBaseline = 'alphabetic';
+    let y = top + 20;
+    if (g.numero_pinches) { ctx.fillStyle = '#b91c1c'; ctx.font = F(800, 34); ctx.fillText('Pinche #' + g.numero_pinches, tx, y + 20); y += 62; }
+    ctx.fillStyle = '#111827'; ctx.font = F(800, 54);
+    envolver(ctx, g.nombre || (g.numero_pinches ? '#' + g.numero_pinches : 'Sin nombre'), tw, 2).forEach(l => { ctx.fillText(l, tx, y + 30); y += 62; });
+    y += 10;
+    var dato = (k, v) => { if (!v) return; ctx.font = F(600, 26); ctx.fillStyle = '#6b7280'; ctx.fillText(k, tx, y); ctx.font = F(600, 30); ctx.fillStyle = '#1f2937'; ctx.fillText(String(v), tx + 190, y); y += 46; };
+    dato('Sexo', g.sexo);
+    dato('Color', g.color);
+    dato('Línea', g.linea_genetica);
+    dato('Nacimiento', g.fecha_nacimiento ? new Date(g.fecha_nacimiento + 'T00:00:00').toLocaleDateString('es-PR', { day: 'numeric', month: 'long', year: 'numeric' }) : null);
+
+    // Descripción (sin notas privadas: solo la parte de plumaje si la hay)
+    let yd = Math.max(y + 10, top + fs + 40);
+    var desc = conDesc ? (g.observaciones || '').trim() : '';
+    if (desc) {
+      ctx.font = F(400, 26); ctx.fillStyle = '#374151';
+      envolver(ctx, desc, W - 120, 3).forEach(l => { ctx.fillText(l, 60, yd); yd += 36; });
+    }
+
+    // Árbol: padres, abuelos, bisabuelos
+    var t0 = yd + 40;
+    ctx.fillStyle = '#111827'; ctx.font = F(800, 34); ctx.fillText('Árbol genealógico', 60, t0);
+    var cols = [{ x: 60, w: 360, label: 'Padres' }, { x: 450, w: 360, label: 'Abuelos' }, { x: 840, w: 340, label: 'Bisabuelos' }];
+    ctx.font = F(700, 22); ctx.fillStyle = '#9ca3af';
+    cols.forEach(c => ctx.fillText(c.label.toUpperCase(), c.x, t0 + 44));
+    var area = { y: t0 + 70, h: H - (t0 + 70) - 90 };
+    var pos = (gen, i) => { var n = Math.pow(2, gen + 1); var slot = area.h / n; return area.y + slot * i + slot / 2; };
+    var caja = (gen, i, ave, esHembra) => {
+      var c = cols[gen]; var n = Math.pow(2, gen + 1); var bh = Math.min(118, area.h / n - 10); var cy = pos(gen, i);
+      rr(ctx, c.x, cy - bh / 2, c.w, bh, 14);
+      ctx.fillStyle = ave ? (esHembra ? '#fdf2f8' : '#eff6ff') : '#f9fafb'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = ave ? (esHembra ? '#f9a8d4' : '#93c5fd') : '#e5e7eb'; ctx.stroke();
+      var pad = 16; ctx.textBaseline = 'middle';
+      if (!ave) { ctx.font = F(500, 22); ctx.fillStyle = '#9ca3af'; ctx.fillText((esHembra ? '♀ ' : '♂ ') + 'Desconocido', c.x + pad, cy); ctx.textBaseline = 'alphabetic'; return cy; }
+      var big = gen === 0 ? 28 : gen === 1 ? 24 : 20;
+      var linea2 = [ave.numero_pinches && ave.nombre ? '#' + ave.numero_pinches : null, ave.color, gen < 2 ? ave.linea_genetica : null].filter(Boolean).join(' · ');
+      var dos = bh > 60 && linea2;
+      ctx.font = F(700, big);
+      var noms = envolver(ctx, (esHembra ? '♀ ' : '♂ ') + nombre(ave), c.w - pad * 2, bh >= 95 ? 2 : 1);
+      var lh = big * 1.18, sh = dos ? big * 0.95 : 0;
+      let ty = cy - (noms.length * lh + sh) / 2 + lh / 2;
+      ctx.fillStyle = esHembra ? '#9d174d' : '#1e40af';
+      noms.forEach(l => { ctx.fillText(l, c.x + pad, ty); ty += lh; });
+      if (dos) { ctx.font = F(500, Math.round(big * 0.78)); ctx.fillStyle = '#6b7280'; ctx.fillText(envolver(ctx, linea2, c.w - pad * 2, 1)[0], c.x + pad, ty - lh / 2 + sh / 2 + 2); }
+      ctx.textBaseline = 'alphabetic';
+      return cy;
+    };
+    var linea = (gen, i, j) => {
+      var c = cols[gen], n = cols[gen + 1]; var y1 = pos(gen, i), y2 = pos(gen + 1, j); var xm = c.x + c.w + (n.x - c.x - c.w) / 2;
+      ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c.x + c.w, y1); ctx.lineTo(xm, y1); ctx.lineTo(xm, y2); ctx.lineTo(n.x, y2); ctx.stroke();
+    };
+    var nivel = [[byId.get(g.padre_id) || null, byId.get(g.madre_id) || null]];
+    for (let gen = 1; gen < 3; gen++) {
+      var prev = nivel[gen - 1], cur = [];
+      prev.forEach(a => { cur.push(a ? byId.get(a.padre_id) || null : null); cur.push(a ? byId.get(a.madre_id) || null : null); });
+      nivel.push(cur);
+    }
+    for (let gen = 0; gen < 2; gen++) nivel[gen].forEach((_, i) => { linea(gen, i, i * 2); linea(gen, i, i * 2 + 1); });
+    nivel.forEach((L, gen) => L.forEach((a, i) => caja(gen, i, a, i % 2 === 1)));
+
+    // Pie
+    ctx.fillStyle = '#f3f4f6'; ctx.fillRect(0, H - 70, W, 70);
+    ctx.fillStyle = '#6b7280'; ctx.font = F(500, 22); ctx.textBaseline = 'middle';
+    ctx.fillText('Gallero PR · Hecho por Prisma Advisors · prisma-advisors.com', 60, H - 35);
+    ctx.textAlign = 'right'; ctx.fillText((g.numero_pinches ? '#' + g.numero_pinches + ' · ' : '') + (g.nombre || ''), W - 60, H - 35); ctx.textAlign = 'left';
+    return cv;
+  };
+
+  async function abrirHoja(id) {
+    var g = S.byId.get(id); if (!g) return;
+    var criador = ''; try { criador = localStorage.getItem('gp_criador') || ''; } catch (x) { /* nada */ }
+    var ov = document.createElement('div'); ov.className = 'hoja-ov';
+    ov.innerHTML = '<div class="hoja-caja"><div class="hoja-top"><b>📄 Pedigrí · ' + esc(nombre(g)) + '</b><button data-h="cerrar" aria-label="Cerrar">✕</button></div>' +
+      '<label class="hoja-lbl">Nombre de tu gallera (sale arriba)</label><input id="hoja-criador" value="' + esc(criador) + '" placeholder="ej: Gallera Yoel">' +
+      '<label class="hoja-chk"><input type="checkbox" id="hoja-desc" checked> Incluir la descripción de la ficha</label>' +
+      '<div id="hoja-prev" class="hoja-prev">Preparando la hoja…</div>' +
+      '<div class="hoja-bts"><button data-h="compartir" class="boton">📤 Compartir</button><button data-h="imagen" class="boton sec2">⬇️ Imagen</button><button data-h="pdf" class="boton sec2">🖨️ PDF</button></div></div>';
+    document.body.appendChild(ov);
+    var foto = S.fotos[id];
+    if (foto === undefined) { try { var r = await sb.from('gallos').select('foto').eq('id', id).single(); foto = r.data && r.data.foto; } catch (x) { foto = null; } }
+    var cv = null, url = null;
+    var archivo = 'pedigri-' + (g.numero_pinches || '') + '-' + norm(g.nombre || 'gallo').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    async function pintar() {
+      var cr = document.getElementById('hoja-criador').value.trim();
+      try { localStorage.setItem('gp_criador', cr); } catch (x) { /* nada */ }
+      cv = await dibujarPedigri(Object.assign({}, g, { foto: foto }), S.byId, cr, document.getElementById('hoja-desc').checked);
+      url = cv.toDataURL('image/png');
+      document.getElementById('hoja-prev').innerHTML = '<img src="' + url + '" alt="Pedigrí">';
+    }
+    await pintar();
+    var tmo = null;
+    ov.addEventListener('input', function () { clearTimeout(tmo); tmo = setTimeout(pintar, 300); });
+    ov.addEventListener('change', function (e) { if (e.target.id === 'hoja-desc') pintar(); });
+    function blob() { return new Promise(function (res) { cv.toBlob(res, 'image/png'); }); }
+    async function bajar() { var b = await blob(); var u = URL.createObjectURL(b); var a = document.createElement('a'); a.href = u; a.download = archivo + '.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 5000); }
+    ov.addEventListener('click', async function (e) {
+      if (e.target === ov) { ov.remove(); return; }
+      var b = e.target.closest('[data-h]'); if (!b || !cv) { if (b && b.getAttribute('data-h') === 'cerrar') ov.remove(); return; }
+      var h = b.getAttribute('data-h');
+      if (h === 'cerrar') ov.remove();
+      else if (h === 'imagen') bajar();
+      else if (h === 'compartir') {
+        var f = new File([await blob()], archivo + '.png', { type: 'image/png' });
+        try { if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: 'Pedigrí ' + nombre(g) }); return; } } catch (x) { if (x && x.name === 'AbortError') return; }
+        bajar();
+      } else if (h === 'pdf') {
+        var w = window.open('', '_blank'); if (!w) { alert('Permite las ventanas emergentes para sacar el PDF'); return; }
+        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + archivo + '</title><style>@page{size:A4;margin:0}html,body{margin:0}img{width:100%;display:block}</style></head><body><img src="' + url + '" onload="setTimeout(function(){window.print()},300)"></body></html>');
+        w.document.close();
+      }
+    });
+  }
+
   document.addEventListener('click', async function (e) {
     var b = e.target.closest('[data-a]'); if (!b) return;
     var a = b.getAttribute('data-a');
@@ -456,6 +608,7 @@
     else if (a === 'mes') { var d = new Date(S.mes.y, S.mes.m + Number(b.getAttribute('data-n')), 1); S.mes = { y: d.getFullYear(), m: d.getMonth() }; var y = window.scrollY; vistaCastas(); window.scrollTo(0, y); }
     else if (a === 'dia') { S.dia = b.getAttribute('data-k'); var y2 = window.scrollY; vistaCastas(); window.scrollTo(0, y2); }
     else if (a === 'instalar' && S.instalar) { S.instalar.prompt(); S.instalar = null; render(); }
+    else if (a === 'hoja') { abrirHoja(b.getAttribute('data-id')); }
   });
 
   document.addEventListener('submit', async function (e) {
