@@ -323,6 +323,13 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
       .sort((a, b) => a[1] - b[1] || sa(a[0].nombre).localeCompare(sa(b[0].nombre)))
       .slice(0, 30).map(x => x[0]);
   }, [q, gallos, filter]);
+  // Si no sale nada, ¿existe pero no se puede escoger aquí (por sexo o estado)? Para avisar.
+  const noDisponibles = useMemo(() => {
+    const qq = String(q || '').trim().replace(/^#/, '');
+    if (!filter || !qq || filtered.length) return [];
+    const sa = (t) => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return gallos.filter(g => !filter(g) && (coincidePinche(g.numero_pinches, qq) || sa(g.nombre).includes(sa(qq)))).slice(0, 3);
+  }, [q, gallos, filter, filtered]);
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -356,7 +363,17 @@ const GalloSearch = ({ gallos, onSelect, selected, onClear, placeholder, filter 
               <p className="font-medium text-gray-800 text-sm">{g.nombre || 'Sin nombre'} {g.numero_pinches ? `(#${g.numero_pinches})` : ''}</p>
               <p className="text-xs text-gray-500">{[g.sexo, g.color, g.linea_genetica || 'Sin línea', g.amarrado ? 'Amarrado' : null, g.estado && g.estado !== 'Activo' ? (ESTADO_META[g.estado] ? ESTADO_META[g.estado].icon + ' ' : '') + g.estado : null].filter(Boolean).join(' • ')}</p>
             </button>
-          )) : <p className="px-3 py-2.5 text-sm text-gray-400">No encontrado</p>}
+          )) : (
+            <div className="px-3 py-2.5 text-sm text-gray-400">
+              No encontrado aquí
+              {noDisponibles.map(g => (
+                <p key={g.id} className="text-[11px] text-orange-600 mt-1">
+                  {nombreGallo(g)}{g.numero_pinches ? ' #' + g.numero_pinches : ''} existe, pero no se puede escoger aquí porque {g.estado && g.estado !== 'Activo' ? 'está ' + g.estado.toLowerCase() : 'es ' + (g.sexo || '').toLowerCase()}.
+                  {g.sexo === 'Pollo' && !(g.estado && g.estado !== 'Activo') ? ' Cuando sepas si es gallo o gallina, cámbialo en su ficha.' : ''}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2395,13 +2412,13 @@ const CastaderoModule = () => {
               <div>
                 <p className="text-xs font-semibold text-blue-600 mb-1">♂ Gallo (padre)</p>
                 <GalloSearch gallos={gallos} selected={padre} onSelect={setPadre} onClear={() => setPadre(null)}
-                  placeholder="Buscar gallo por nombre o pinche..." filter={g => g.sexo === 'Gallo' && (!g.estado || g.estado === 'Activo')} />
+                  placeholder="Buscar gallo por nombre o pinche..." filter={g => (g.sexo === 'Gallo' || g.sexo === 'Pollo') && (!g.estado || g.estado === 'Activo')} />
               </div>
               <div className="text-center text-gray-300 text-xl leading-none">✕</div>
               <div>
                 <p className="text-xs font-semibold text-pink-600 mb-1">♀ Gallina (madre)</p>
                 <GalloSearch gallos={gallos} selected={madre} onSelect={setMadre} onClear={() => setMadre(null)}
-                  placeholder="Buscar gallina por nombre o pinche..." filter={g => g.sexo === 'Gallina' && (!g.estado || g.estado === 'Activo')} />
+                  placeholder="Buscar gallina por nombre o pinche..." filter={g => (g.sexo === 'Gallina' || g.sexo === 'Pollo') && (!g.estado || g.estado === 'Activo')} />
                 {madre && madre.limpieza_desde && estadoLimpieza(madre, cruces).tipo === 'limpiando' && (() => { const e = estadoLimpieza(madre, cruces); return (
                   <p className={`text-[11px] font-semibold mt-1 ${e.lista ? 'text-green-700' : 'text-orange-600'}`}>
                     {e.lista ? `✅ Limpia · ${e.dias} días en jaula aparte` : `⏳ Aún no está limpia · ${e.dias}/${DIAS_LIMPIEZA} días (lista el ${fmtF(e.fechaLista)})`}
