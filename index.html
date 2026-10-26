@@ -2917,6 +2917,7 @@ const GeneticaModule = () => {
   const [soloAmarrados, setSoloAmarrados] = useState(false);
   const [filtroEstado, setFiltroEstado] = useState('todos');
   const [showRevision, setShowRevision] = useState(false);
+  const [showSalud, setShowSalud] = useState(false);
   const [hojaGallo, setHojaGallo] = useState(null);
   const nRevisar = useMemo(() => revisarDatos(gallos).filter(g => g.nivel !== 'baja').reduce((a, g) => a + g.items.length, 0), [gallos]);  // todos | Activo | Muerto | Perdido | Regalado | Vendido
   const [orden, setOrden] = useState('nombre');             // nombre | recientes | pinche
@@ -3201,6 +3202,8 @@ const GeneticaModule = () => {
           <p className="text-sm text-gray-500">{gallos.length} gallos registrados</p>
         </div>
         <div className="flex items-center gap-2">
+          {canEdit && <button onClick={() => setShowSalud(true)}
+            className="bg-white border border-gray-200 text-gray-700 px-3 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50 whitespace-nowrap">💊 Salud</button>}
           <button onClick={() => setShowRevision(true)}
             className="bg-white border border-gray-200 text-gray-700 px-3 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50 whitespace-nowrap">
             🩺 Revisar{nRevisar > 0 ? <span className="ml-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{nRevisar}</span> : null}
@@ -3211,6 +3214,7 @@ const GeneticaModule = () => {
           </button>}
         </div>
       </div>
+      {showSalud && <SaludAnotarModal gallos={gallos} inicial={[]} onClose={() => setShowSalud(false)} />}
       {showRevision && <RevisionDatosModal gallos={gallos} onClose={() => setShowRevision(false)}
         onAbrir={(g) => { setShowRevision(false); if (canEdit) handleEdit(g); else setShowArbol(g); }} />}
       {hojaGallo && <HojaPedigriModal gallo={gallos.find(x => x.id === hojaGallo.id) || hojaGallo} gallos={gallos} onClose={() => setHojaGallo(null)} />}
@@ -4944,9 +4948,182 @@ const RevisionDatosModal = ({ gallos, onAbrir, onClose }) => {
 };
 
 // ============================================
+// SALUD: desparasitante, vitaminas, vacunas… por ave
+// ============================================
+const TIPOS_SALUD = [
+  { id: 'Desparasitante', icon: '💊', repetir: 30 },
+  { id: 'Vitamina', icon: '🧪', repetir: null },
+  { id: 'Vacuna', icon: '💉', repetir: null },
+  { id: 'Baño contra piojillo', icon: '🛁', repetir: 15 },
+  { id: 'Medicina', icon: '🩹', repetir: null },
+  { id: 'Otro', icon: '📝', repetir: null },
+];
+const iconSalud = (t) => (TIPOS_SALUD.find(x => x.id === t) || { icon: '📝' }).icon;
+const verboSalud = (t) => ({ 'Desparasitante': 'Desparasitar', 'Vitamina': 'Dar vitamina', 'Vacuna': 'Vacunar', 'Baño contra piojillo': 'Bañar contra piojillo', 'Medicina': 'Dar medicina' }[t] || t);
+
+// Próxima dosis por ave y tipo (la última anotada con "repetir cada")
+const proximasSalud = (registros, gallos) => {
+  const vivos = new Map(gallos.filter(g => !g.estado || g.estado === 'Activo').map(g => [g.id, g]));
+  const ultimo = new Map();
+  registros.forEach(r => {
+    const k = r.gallo_id + '|' + r.tipo + '|' + (r.producto || '');
+    const u = ultimo.get(k);
+    if (!u || String(r.fecha) > String(u.fecha)) ultimo.set(k, r);
+  });
+  const out = [];
+  ultimo.forEach(r => {
+    if (!r.repetir_dias || !vivos.has(r.gallo_id)) return;
+    out.push({ r, g: vivos.get(r.gallo_id), proxima: sumarDias(String(r.fecha).slice(0, 10), r.repetir_dias) });
+  });
+  return out;
+};
+
+const SaludAnotarModal = ({ gallos, inicial, onClose, onSaved }) => {
+  const { toast, activeOwnerId } = useContext(AppContext);
+  const [tipo, setTipo] = useState('Desparasitante');
+  const [fecha, setFecha] = useState(hoyStr());
+  const [producto, setProducto] = useState('');
+  const [dosis, setDosis] = useState('');
+  const [repetir, setRepetir] = useState('30');
+  const [notas, setNotas] = useState('');
+  const [sel, setSel] = useState(() => (inicial || []).map(g => g.id));
+  const [saving, setSaving] = useState(false);
+  const vivos = useMemo(() => gallos.filter(g => !g.estado || g.estado === 'Activo'), [gallos]);
+  const byId = useMemo(() => new Map(gallos.map(g => [g.id, g])), [gallos]);
+  const escogerTipo = (t) => { setTipo(t.id); setRepetir(t.repetir ? String(t.repetir) : ''); };
+  const agregar = (lista) => setSel(s => Array.from(new Set(s.concat(lista.map(g => g.id)))));
+  const grupos = [
+    { txt: '🐣 Pollos', f: g => g.sexo === 'Pollo' },
+    { txt: '♀ Gallinas', f: g => g.sexo === 'Gallina' },
+    { txt: '♂ Gallos', f: g => g.sexo === 'Gallo' },
+    { txt: '🔗 Amarrados', f: g => g.amarrado },
+    { txt: 'Todos', f: () => true },
+  ];
+  const guardar = async () => {
+    if (!sel.length) { toast('Escoge por lo menos un ave', 'error'); return; }
+    if (!fecha) { toast('Pon la fecha', 'error'); return; }
+    setSaving(true);
+    const filas = sel.map(id => ({ user_id: activeOwnerId, gallo_id: id, fecha, tipo, producto: producto.trim() || null, dosis: dosis.trim() || null,
+      repetir_dias: repetir ? parseInt(repetir, 10) : null, notas: notas.trim() || null }));
+    const { error } = await supabase.from('salud_registros').insert(filas);
+    setSaving(false);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    toast(`${iconSalud(tipo)} Anotado en ${sel.length} ave${sel.length === 1 ? '' : 's'}`);
+    onSaved && onSaved(); onClose();
+  };
+  return (
+    <Modal title="🩺 Anotar salud" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm font-medium text-gray-700 mb-1.5">¿Qué le diste?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {TIPOS_SALUD.map(t => (
+              <button key={t.id} type="button" onClick={() => escogerTipo(t)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${tipo === t.id ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>{t.icon} {t.id}</button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Fecha"><Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} /></Field>
+          <Field label="Repetir cada">
+            <Select value={repetir} onChange={e => setRepetir(e.target.value)}
+              options={[{ value: '', label: 'No repetir' }, { value: '7', label: '7 días' }, { value: '15', label: '15 días' }, { value: '21', label: '21 días' }, { value: '30', label: '30 días' }, { value: '60', label: '2 meses' }, { value: '90', label: '3 meses' }, { value: '180', label: '6 meses' }]} />
+          </Field>
+          <Field label="Producto (opcional)"><Input value={producto} onChange={e => setProducto(e.target.value)} placeholder="ej: Ivermectina" /></Field>
+          <Field label="Dosis (opcional)"><Input value={dosis} onChange={e => setDosis(e.target.value)} placeholder="ej: 0.2 ml" /></Field>
+        </div>
+        {repetir && fecha && <p className="text-[11px] text-gray-500 -mt-2">Te avisa el {fmtF(sumarDias(fecha, parseInt(repetir, 10)))} en 🔔 Pendientes.</p>}
+        <Field label="Notas (opcional)"><Textarea value={notas} onChange={e => setNotas(e.target.value)} placeholder="ej: en el agua, inyectado, por la boca…" /></Field>
+
+        <div className="border-t pt-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-sm font-medium text-gray-700">¿A cuáles? <span className="text-gray-400 font-normal">({sel.length})</span></p>
+            {sel.length > 0 && <button onClick={() => setSel([])} className="text-[11px] text-gray-400 underline">Quitar todos</button>}
+          </div>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {grupos.map(gr => {
+              const n = vivos.filter(gr.f).length;
+              return <button key={gr.txt} type="button" onClick={() => agregar(vivos.filter(gr.f))} disabled={!n}
+                className="px-2.5 py-1 rounded-full text-[11px] font-semibold border border-gray-200 bg-gray-50 text-gray-600 disabled:opacity-40">+ {gr.txt} ({n})</button>;
+            })}
+          </div>
+          <GalloSearch gallos={vivos} selected={null} onSelect={g => agregar([g])} onClear={() => {}}
+            filter={g => !sel.includes(g.id)} placeholder="Añadir uno por nombre o pinche…" />
+          {sel.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2 max-h-40 overflow-y-auto">
+              {sel.map(id => { const g = byId.get(id); return g ? (
+                <span key={id} className="inline-flex items-center gap-1 bg-red-50 text-red-800 text-[11px] font-medium pl-2 pr-1 py-0.5 rounded-full">
+                  {sexoIcon(g)} {nombreGallo(g)}{g.nombre && g.numero_pinches ? ' #' + g.numero_pinches : ''}
+                  <button onClick={() => setSel(s => s.filter(x => x !== id))} className="w-4 h-4 rounded-full hover:bg-red-100 text-red-500">✕</button>
+                </span>) : null; })}
+            </div>
+          )}
+        </div>
+        <button onClick={guardar} disabled={saving} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold disabled:opacity-50">
+          {saving ? 'Guardando…' : `Guardar en ${sel.length} ave${sel.length === 1 ? '' : 's'}`}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+// Historial de salud de un ave (en la ficha de Inicio)
+const SaludCard = ({ gallo }) => {
+  const { gallos, canEdit, toast } = useContext(AppContext);
+  const [regs, setRegs] = useState(null);
+  const [anotar, setAnotar] = useState(false);
+  const [verTodo, setVerTodo] = useState(false);
+  const cargar = useCallback(async () => {
+    const { data, error } = await supabase.from('salud_registros').select('*').eq('gallo_id', gallo.id).order('fecha', { ascending: false });
+    setRegs(error ? [] : (data || []));
+  }, [gallo.id]);
+  useEffect(() => { cargar(); }, [cargar]);
+  const borrar = async (r) => {
+    if (!confirm('¿Borrar "' + r.tipo + '" del ' + fmtF(r.fecha) + '?')) return;
+    const { error } = await supabase.from('salud_registros').delete().eq('id', r.id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+    cargar();
+  };
+  const prox = regs ? proximasSalud(regs, [gallo]) : [];
+  const hoy = hoyStr();
+  const lista = regs ? (verTodo ? regs : regs.slice(0, 5)) : [];
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-bold text-gray-800">🩺 Salud</h4>
+        {canEdit && <button onClick={() => setAnotar(true)} className="text-xs font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">+ Anotar</button>}
+      </div>
+      {prox.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {prox.map(p => { const d = diasEntre(hoy, p.proxima); return (
+            <p key={p.r.id} className={`text-xs font-semibold rounded-lg px-2.5 py-1.5 ${d < 0 ? 'bg-red-50 text-red-700' : d <= 3 ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>
+              {iconSalud(p.r.tipo)} Próximo: {verboSalud(p.r.tipo)}{p.r.producto ? ' (' + p.r.producto + ')' : ''} el {fmtF(p.proxima)} · {d < 0 ? `atrasado ${-d} día${d === -1 ? '' : 's'}` : d === 0 ? 'hoy' : `en ${d} día${d === 1 ? '' : 's'}`}
+            </p>); })}
+        </div>
+      )}
+      {regs === null ? <p className="text-xs text-gray-400">Cargando…</p>
+        : regs.length === 0 ? <p className="text-xs text-gray-400">No hay nada anotado todavía.</p>
+        : <div className="divide-y divide-gray-100">
+            {lista.map(r => (
+              <div key={r.id} className="flex items-start justify-between py-1.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-800">{iconSalud(r.tipo)} {r.tipo}{r.producto ? ' · ' + r.producto : ''}{r.dosis ? ' · ' + r.dosis : ''}</p>
+                  <p className="text-[11px] text-gray-500">{fmtF(r.fecha)} {String(r.fecha).slice(0, 4)}{r.repetir_dias ? ` · cada ${r.repetir_dias} días` : ''}{r.notas ? ' — ' + r.notas : ''}</p>
+                </div>
+                {canEdit && <button onClick={() => borrar(r)} className="text-gray-300 hover:text-red-500 text-sm ml-2">🗑</button>}
+              </div>
+            ))}
+            {regs.length > 5 && <button onClick={() => setVerTodo(v => !v)} className="text-[11px] text-gray-500 font-semibold pt-1.5">{verTodo ? '▴ Menos' : `▾ Ver todo (${regs.length})`}</button>}
+          </div>}
+      {anotar && <SaludAnotarModal gallos={gallos} inicial={[gallo]} onClose={() => setAnotar(false)} onSaved={cargar} />}
+    </div>
+  );
+};
+
+// ============================================
 // PENDIENTES Y RECORDATORIOS (Inicio)
 // ============================================
-const calcularPendientes = (gallos, cruces, eventos) => {
+const calcularPendientes = (gallos, cruces, eventos, salud) => {
   const hoy = hoyStr();
   const out = [];
   const byId = new Map(gallos.map(g => [g.id, g]));
@@ -4969,6 +5146,18 @@ const calcularPendientes = (gallos, cruces, eventos) => {
     if (r.fNac && pollos.length > r.pinchados) out.push({ key: 'pinchar-' + c.id, fecha: hoy, icon: '🏷️', tipo: 'pinchar', titulo: `Faltan ${pollos.length - r.pinchados} pollo${pollos.length - r.pinchados === 1 ? '' : 's'} por pinchar`, sub: titulo + ' · nacieron el ' + fmtF(r.fNac) });
     if (!r.huevos && !r.empolle && !r.fNac && !r.fallido && c.fecha_cruce && diasEntre(c.fecha_cruce, hoy) >= 14)
       out.push({ key: 'sinhuevo-' + c.id, fecha: hoy, icon: '🥚', tipo: 'revisar', titulo: 'Casta sin huevos anotados', sub: titulo + ` · le echaste el gallo hace ${diasEntre(c.fecha_cruce, hoy)} días` });
+  });
+  // Salud: próximas dosis, agrupadas por lo que toca y el día
+  const grupos = new Map();
+  proximasSalud(salud || [], gallos).forEach(p => {
+    const k = p.r.tipo + '|' + (p.r.producto || '') + '|' + p.proxima;
+    (grupos.get(k) || grupos.set(k, { p, aves: [] }).get(k)).aves.push(p.g);
+  });
+  grupos.forEach(({ p, aves }, k) => {
+    const n = aves.length;
+    out.push({ key: 'salud-' + k, fecha: p.proxima, icon: iconSalud(p.r.tipo), tipo: 'salud',
+      titulo: verboSalud(p.r.tipo) + (p.r.producto ? ' (' + p.r.producto + ')' : '') + (n === 1 ? ' a ' + nombreGallo(aves[0]) : ` · ${n} aves`),
+      sub: (n > 1 ? aves.slice(0, 8).map(g => g.numero_pinches ? '#' + g.numero_pinches : nombreGallo(g)).join(', ') + (n > 8 ? ` y ${n - 8} más` : '') + ' · ' : '') + `cada ${p.r.repetir_dias} días, la última el ${fmtF(p.r.fecha)}` });
   });
   return out.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
 };
@@ -4993,20 +5182,25 @@ const PendientesCard = ({ gallos }) => {
   const { activeOwnerId, toast } = useContext(AppContext);
   const [cruces, setCruces] = useState([]);
   const [eventos, setEventos] = useState([]);
+  const [salud, setSalud] = useState([]);
   const [verTodos, setVerTodos] = useState(false);
-  useEffect(() => {
+  const [anotarSalud, setAnotarSalud] = useState(false);
+  const { canEdit } = useContext(AppContext);
+  const cargar = useCallback(() => {
     if (!activeOwnerId) return;
     Promise.all([
       supabase.from('cruces').select('*').eq('user_id', activeOwnerId),
       supabase.from('cruce_eventos').select('*').eq('user_id', activeOwnerId),
-    ]).then(([c, e]) => { setCruces(c.data || []); setEventos(e.data || []); });
+      supabase.from('salud_registros').select('id,gallo_id,fecha,tipo,producto,repetir_dias').eq('user_id', activeOwnerId),
+    ]).then(([c, e, sa]) => { setCruces(c.data || []); setEventos(e.data || []); setSalud(sa.error ? [] : (sa.data || [])); });
   }, [activeOwnerId]);
-  const items = useMemo(() => calcularPendientes(gallos, cruces, eventos), [gallos, cruces, eventos]);
+  useEffect(() => { cargar(); }, [cargar]);
+  const items = useMemo(() => calcularPendientes(gallos, cruces, eventos, salud), [gallos, cruces, eventos, salud]);
   const hoy = hoyStr();
   const cuando = (f) => { const d = diasEntre(hoy, f); return d === 0 ? 'Hoy' : d === 1 ? 'Mañana' : d > 1 ? `En ${d} días` : `Hace ${-d} día${d === -1 ? '' : 's'}`; };
   const ahora = items.filter(it => diasEntre(hoy, it.fecha) <= 7);
   const despues = items.filter(it => diasEntre(hoy, it.fecha) > 7);
-  const futuros = items.filter(it => it.fecha >= hoy && (it.tipo === 'limpieza' || it.tipo === 'nacimiento'));
+  const futuros = items.filter(it => it.fecha >= hoy && (it.tipo === 'limpieza' || it.tipo === 'nacimiento' || it.tipo === 'salud'));
 
   const alCalendario = async () => {
     if (!futuros.length) { toast('No hay fechas próximas para avisarte', 'error'); return; }
@@ -5040,8 +5234,12 @@ const PendientesCard = ({ gallos }) => {
     <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4">
       <div className="flex items-center justify-between mb-1">
         <p className="text-sm font-bold text-gray-800">🔔 Pendientes {ahora.length ? <span className="text-red-600">({ahora.length})</span> : null}</p>
-        <button onClick={alCalendario} className="text-[11px] font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">📅 Avisos en el teléfono</button>
+        <div className="flex gap-1.5">
+          {canEdit && <button onClick={() => setAnotarSalud(true)} className="text-[11px] font-semibold text-gray-700 bg-gray-100 px-2.5 py-1 rounded-lg">🩺 Anotar salud</button>}
+          <button onClick={alCalendario} className="text-[11px] font-semibold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">📅 Avisos</button>
+        </div>
       </div>
+      {anotarSalud && <SaludAnotarModal gallos={gallos} inicial={[]} onClose={() => setAnotarSalud(false)} onSaved={cargar} />}
       {ahora.length === 0
         ? <p className="text-xs text-gray-400 py-2">Nada para esta semana.</p>
         : ahora.map(it => <Fila key={it.key} it={it} />)}
@@ -5360,6 +5558,8 @@ const DashboardModule = () => {
             </div>
             {showHoja && <HojaPedigriModal gallo={gallos.find(x => x.id === selected.id) || selected} gallos={gallos} onClose={() => setShowHoja(false)} />}
           </div>
+
+          <SaludCard key={selected.id} gallo={selected} />
 
           {/* Entrenamientos recientes */}
           {selected.amarrado && (
